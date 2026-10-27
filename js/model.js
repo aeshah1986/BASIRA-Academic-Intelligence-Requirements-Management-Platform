@@ -33,9 +33,9 @@
 
   var MESSAGES = {
     titleRequired: 'العنوان مطلوب.',
-    indicatorRequired: 'اختر المؤشر.',
+    indicatorRequired: 'يرجى اختيار المؤشر.',
     indicatorUnknown: 'المؤشر المحدد غير موجود.',
-    entityRequired: 'اختر الجهة المسؤولة.',
+    entityRequired: 'يرجى اختيار الجهة المسؤولة.',
     entityUnknown: 'الجهة المحددة غير موجودة.',
     deadlineInvalid: 'الموعد النهائي غير صالح.',
     statusUnknown: 'الحالة غير معروفة.',

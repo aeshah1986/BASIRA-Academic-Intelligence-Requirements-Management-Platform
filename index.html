@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="بصيرة: منصة محلية لإدارة متطلبات ومؤشرات التصنيفات الجامعية">
+  <title>بصيرة</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">انتقل إلى المحتوى</a>
+
+  <header class="topbar">
+    <a href="#/dashboard" class="brand" aria-label="بصيرة — لوحة القيادة">
+      <span class="brand__name">بصيرة</span>
+      <span class="brand__tag">إدارة المتطلبات والمؤشرات الجامعية</span>
+    </a>
+    <div class="topbar__end">
+      <span id="today-label" class="topbar__date"></span>
+      <button type="button" id="data-button" class="btn btn--on-dark">البيانات</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="التنقل الرئيسي">
+      <ul id="nav-list" class="nav"></ul>
+      <p class="sidebar__foot">تعمل محليًا على هذا الجهاز</p>
+    </nav>
+
+    <div class="content">
+      <div id="banners" class="banners"></div>
+      <main id="main" tabindex="-1">
+        <noscript>
+          <p class="banner banner--danger">تحتاج «بصيرة» إلى تفعيل JavaScript في المتصفح.</p>
+        </noscript>
+      </main>
+    </div>
+  </div>
+
+  <nav class="bottom-nav" aria-label="التنقل (الجوال)">
+    <ul id="bottom-nav-list" class="bnav"></ul>
+    <button type="button" id="more-button" class="bnav__link bnav__more" aria-expanded="false" aria-controls="more-sheet">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h.01"/><path d="M12 12h.01"/><path d="M19 12h.01"/></svg>
+      <span>المزيد</span>
+    </button>
+    <div id="more-sheet" class="more-sheet" hidden>
+      <ul id="more-list" class="more-list"></ul>
+    </div>
+  </nav>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <dialog id="dialog" class="dialog"></dialog>
+
+  <!-- البيانات والمنطق (UMD، مفحوصة بـ node --test) -->
+  <script src="data/sample-data.js"></script>
+  <script src="js/normalize.js"></script>
+  <script src="js/model.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/format.js"></script>
+  <script src="js/derive.js"></script>
+  <script src="js/query.js"></script>
+  <!-- الواجهة -->
+  <script src="js/ui/dom.js"></script>
+  <script src="js/ui/shared.js"></script>
+  <script src="js/ui/app.js"></script>
+  <script src="js/ui/views/dashboard.js"></script>
+  <script src="js/ui/views/indicators.js"></script>
+  <script src="js/ui/views/requirements.js"></script>
+  <script src="js/ui/views/others.js"></script>
+</body>
+</html>

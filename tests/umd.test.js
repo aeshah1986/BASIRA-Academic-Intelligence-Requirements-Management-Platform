@@ -11,7 +11,10 @@ const FILES = [
   ['data/sample-data.js', 'sampleData', 'createSampleData'],
   ['js/normalize.js', 'normalize', 'normalizeText'],
   ['js/model.js', 'model', 'validateRequirement'],
-  ['js/storage.js', 'storage', 'createStore']
+  ['js/storage.js', 'storage', 'createStore'],
+  ['js/format.js', 'format', 'formatDate'],
+  ['js/derive.js', 'derive', 'dueInfo'],
+  ['js/query.js', 'query', 'filterRequirements']
 ];
 
 test('كل ملف يعمل كسكربت عادي ويضيف واجهته إلى Basira دون تعارض', () => {
