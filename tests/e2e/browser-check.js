@@ -19,7 +19,9 @@ const { pathToFileURL } = require('node:url');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const TODAY = '2026-11-01';
-const APP = pathToFileURL(path.join(ROOT, 'index.html')).href + '?today=' + TODAY;
+// حالات القبول مبنية على بيانات الفحص الثابتة F1–F6، فيُطلب مصدرها صراحة.
+const APP = pathToFileURL(path.join(ROOT, 'index.html')).href + '?today=' + TODAY + '&dataset=fixtures';
+const DEMO = pathToFileURL(path.join(ROOT, 'index.html')).href; // الوضع الافتراضي: بيانات العرض وتاريخ الجهاز
 const CANDIDATES = [
   process.env.BASIRA_BROWSER,
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -297,6 +299,41 @@ async function run(cdp, tmp) {
   const st = await blocked.eval(`return { warn: /الحفظ غير متاح/.test(document.body.textContent), h1: document.querySelector('#main h1').textContent, kpis: [...document.querySelectorAll('.kpi__value')].map(e => e.textContent).join(',') };`);
   check('E-20', 'تعذر التخزين: رسالة عربية والصفحة تعمل (AC-PER-06)', st.warn && st.h1 === 'لوحة القيادة' && st.kpis === '5,2,2,1,1', JSON.stringify(st));
   await cdp.send('Target.closeTarget', { targetId: blocked.targetId });
+
+  // E-21..23 الوضع الافتراضي: بيانات العرض بتاريخ الجهاز
+  const demo = await openPage(cdp);
+  await demo.viewport(1280, 900, false);
+  await demo.goto(DEMO + '#/dashboard');
+  await demo.eval(`localStorage.removeItem('basira.v1');`); // ملف التعريف مشترك مع السيناريوهات السابقة
+  await demo.goto(DEMO + '#/dashboard');
+  // تُقرأ النتيجة من الواجهة المعروضة (بيانات العرض لا تُحفظ في التخزين قبل أول تعديل).
+  const info = await demo.eval(`
+    const kpis = [...document.querySelectorAll('.kpi')].map(k => k.querySelector('.kpi__label').textContent + '=' + k.querySelector('.kpi__value').textContent).join('، ');
+    const banner = /بيانات تجريبية وهمية/.test(document.getElementById('banners').textContent);
+    const visit = async h => { location.hash = h; await new Promise(r => setTimeout(r, 200)); return document.getElementById('main'); };
+    let m = await visit('#/requirements');
+    const reqCount = m.querySelector('.result-count').textContent;
+    const assignees = [...m.querySelectorAll('td[data-label="المكلَّف"]')].map(td => td.textContent);
+    const labels = [];
+    for (const h of ['#/dashboard', '#/requirements', '#/entities', '#/followups', '#/followups?tab=decisions', '#/rankings']) {
+      m = await visit(h); const hit = m.textContent.match(/وهمي|مكلف \\(|افتراضي/); if (hit) labels.push(h + ':' + hit[0]);
+    }
+    m = await visit('#/entities');
+    const entities = m.querySelectorAll('tbody tr').length;
+    m = await visit('#/rankings'); const arab = m.querySelectorAll('tbody tr').length;
+    m = await visit('#/rankings?ranking=QS'); const qs = m.querySelectorAll('tbody tr').length;
+    m = await visit('#/followups'); const followUps = m.querySelectorAll('.timeline li').length;
+    m = await visit('#/followups?tab=decisions'); const decisions = m.querySelectorAll('tbody tr').length;
+    return { kpis, banner, reqCount, entities, indicators: arab + qs, followUps, decisions, labels, sampleAssignees: [...new Set(assignees)].slice(0, 4) };`);
+  check('E-21', 'بيانات العرض تُحمَّل افتراضيًا بأسماء دون وسم «وهمي»، ويبقى الشريط العام',
+    info.reqCount === 'عدد النتائج: 21 من 21' && info.entities === 9 && info.indicators === 14 && info.decisions === 4 && !info.labels.length && info.banner,
+    info.reqCount + ' · جهات ' + info.entities + ' · مؤشرات ' + info.indicators + ' · متابعات ' + info.followUps + ' · أسئلة ' + info.decisions + ' · ' + info.kpis + ' · أمثلة: ' + info.sampleAssignees.join('، ') + (info.labels.length ? ' · وسوم: ' + info.labels.join(' ') : ''));
+  check('E-22', 'بيانات العرض: كل المسارات على الحاسوب دون مشكلات', !(await sweep(demo)).length);
+  await demo.viewport(375, 812, true);
+  const demoMobile = await sweep(demo);
+  check('E-23', 'بيانات العرض: كل المسارات على الجوال دون تمرير أفقي', !demoMobile.length, demoMobile.join(' ') || 'سليم');
+  check('E-24', 'بيانات العرض: لا أخطاء في وحدة التحكم', !demo.errors.length, demo.errors.join(' | ') || 'صفر');
+  await cdp.send('Target.closeTarget', { targetId: demo.targetId });
   return pdfPath;
 }
 

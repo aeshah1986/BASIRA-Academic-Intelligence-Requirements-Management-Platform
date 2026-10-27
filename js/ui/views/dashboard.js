@@ -46,7 +46,7 @@
       return h('li', null, h('a', { href: '#/requirements/' + encodeURIComponent(r.id), class: 'attention__item' },
         h('span', { class: 'attention__main' },
           h('span', { class: 'attention__title' }, r.title),
-          h('span', { class: 'muted small' }, ind ? B.dom.ltr(ind.code) : '—', ' · ', ent ? ent.name : '—', r.assignee ? ' · ' + r.assignee : '')),
+          h('span', { class: 'muted small' }, ind ? B.dom.ltr(ind.code) : '—', ' · ', ent ? ent.name : '—', r.assignee ? [' · ', U.person(r.assignee)] : null)),
         h('span', { class: 'attention__badges' }, U.dueBadge(r, ctx.today), U.priorityBadge(r.priority))));
     }));
   }

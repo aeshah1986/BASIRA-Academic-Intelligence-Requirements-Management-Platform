@@ -131,7 +131,7 @@
       h('div', null, h('dt', null, 'الوصف'), h('dd', null, r.description || h('span', { class: 'muted' }, 'لا وصف'))),
       h('div', null, h('dt', null, 'المؤشر'), h('dd', null, ind ? h('a', { href: '#/indicators/' + encodeURIComponent(ind.id) }, B.dom.ltr(ind.code), ' · ', ind.name) : '—')),
       h('div', null, h('dt', null, 'الجهة المسؤولة'), h('dd', null, ent ? h('a', { href: '#/entities/' + encodeURIComponent(ent.id) }, ent.name) : '—')),
-      h('div', null, h('dt', null, 'المكلَّف'), h('dd', null, r.assignee || '—')),
+      h('div', null, h('dt', null, 'المكلَّف'), h('dd', null, U.person(r.assignee))),
       h('div', null, h('dt', null, 'الموعد النهائي'), h('dd', null, B.format.formatDate(r.deadline), ' ', U.dueBadge(r, ctx.today))),
       h('div', null, h('dt', null, 'البيانات الناقصة'), h('dd', null, r.missingData || h('span', { class: 'muted' }, 'لا شيء'))),
       h('div', null, h('dt', null, 'رابط الدليل'), h('dd', null, link ? h('a', { href: link, target: '_blank', rel: 'noopener noreferrer' }, B.dom.ltr(link)) : h('span', { class: 'muted' }, 'لا يوجد'))));

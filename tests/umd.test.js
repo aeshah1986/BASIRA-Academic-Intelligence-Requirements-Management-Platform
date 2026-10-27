@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const FILES = [
   ['data/sample-data.js', 'sampleData', 'createSampleData'],
+  ['data/demo-data.js', 'demoData', 'createDemoData'],
   ['js/normalize.js', 'normalize', 'normalizeText'],
   ['js/model.js', 'model', 'validateRequirement'],
   ['js/storage.js', 'storage', 'createStore'],

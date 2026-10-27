@@ -11,7 +11,7 @@
 
   // ---------- الحالة ----------
   var state = { data: null, today: null, persistent: true, loadMessage: '', currentPath: null };
-  var store = B.storage.createStore(B.storage.getBrowserStorage(), B.sampleData.createSampleData);
+  var store = null;
 
   // تاريخ مرجعي اختياري للتجربة: index.html?today=2026-11-01 (وإلا تاريخ الجهاز).
   function resolveToday() {
@@ -19,12 +19,24 @@
     return param && B.format.parseISO(param) !== null ? param : B.format.todayISO();
   }
 
+  /*
+   * مصدر البيانات الأولية (عند أول تشغيل وعند «إعادة البيانات التجريبية»):
+   * - افتراضيًا: بيانات العرض (data/demo-data.js) بتواريخ نسبية إلى اليوم.
+   * - ?dataset=fixtures: بيانات الفحص الثابتة F1–F6 التي بُنيت عليها حالات القبول.
+   */
+  function resolveSeed(today) {
+    var useFixtures = new URLSearchParams(root.location.search).get('dataset') === 'fixtures';
+    if (useFixtures || !B.demoData) return B.sampleData.createSampleData;
+    return function () { return B.demoData.createDemoData(today); };
+  }
+
   function load() {
+    state.today = resolveToday();
+    store = B.storage.createStore(B.storage.getBrowserStorage(), resolveSeed(state.today));
     var result = store.load();
     state.data = result.data;
     state.persistent = result.persistent;
     state.loadMessage = result.message;
-    state.today = resolveToday();
   }
 
   function lookups() {

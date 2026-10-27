@@ -12,6 +12,8 @@
   var DUE_TONE = { overdue: 'danger', soon: 'warning', later: 'neutral', done: 'success', none: 'neutral' };
 
   function rankingName(code) { return RANKING_NAMES[code] || code; }
+  // اسم الشخص في سطر واحد (لا ينفصل «د.» عن الاسم عند التفاف السطر).
+  function person(name) { return name ? h('span', { class: 'nowrap' }, name) : '—'; }
   function statusBadge(status) { return B.dom.badge(M.STATUSES[status] || status, status === 'done' ? 'success' : 'neutral'); }
   function priorityBadge(p) { return B.dom.badge(M.PRIORITIES[p] || p, p === 'high' ? 'strong' : 'neutral'); }
   function workBadge(ws) { return B.dom.badge(M.WORK_STATUSES[ws] || ws, WORK_TONE[ws] || 'neutral'); }
@@ -68,7 +70,7 @@
       } },
       { label: 'المؤشر', cell: function (r) { var i = L.indicatorsById[r.indicatorId]; return i ? B.dom.ltr(i.code) : '—'; } },
       { label: 'الجهة', cell: function (r) { var e = L.entitiesById[r.entityId]; return e ? e.name : '—'; } },
-      { label: 'المكلَّف', cls: 'col-secondary', cell: function (r) { return r.assignee || '—'; } },
+      { label: 'المكلَّف', cls: 'col-secondary', cell: function (r) { return person(r.assignee); } },
       { label: 'الموعد', cell: function (r) { return h('span', { class: 'stack-xs' }, B.format.formatDate(r.deadline), dueBadge(r, ctx.today)); } },
       { label: 'الحالة', cell: function (r) { return statusBadge(r.status); } },
       { label: 'الأولوية', cell: function (r) { return priorityBadge(r.priority); } },
@@ -158,6 +160,7 @@
   B.ui = {
     RANKING_NAMES: RANKING_NAMES,
     rankingName: rankingName,
+    person: person,
     statusBadge: statusBadge,
     priorityBadge: priorityBadge,
     workBadge: workBadge,

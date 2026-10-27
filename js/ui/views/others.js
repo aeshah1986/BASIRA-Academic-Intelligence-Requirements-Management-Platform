@@ -19,7 +19,7 @@
       { label: 'متأخر', cell: function (e) { return s[e.id].overdue ? B.dom.badge(String(s[e.id].overdue), 'danger') : '0'; } },
       { label: 'مكتمل', cell: function (e) { return String(s[e.id].done); } },
       { label: 'نسبة الإنجاز', cell: function (e) { return B.dom.ltr(s[e.id].pct === null ? '—' : s[e.id].pct + '%'); } },
-      { label: 'المكلفون', cls: 'col-secondary', cell: function (e) { return s[e.id].assignees.length ? s[e.id].assignees.join('، ') : '—'; } }
+      { label: 'المكلفون', cls: 'col-secondary', cell: function (e) { return s[e.id].assignees.length ? s[e.id].assignees.map(function (a, i) { return [i ? '، ' : null, U.person(a)]; }) : '—'; } }
     ], d.entities, function (e) { return e.id; }) : B.dom.emptyState('لا توجد جهات', 'تُضاف الجهات من البيانات التجريبية أو النسخة الاحتياطية حاليًا.');
 
     return h('div', null,
@@ -113,7 +113,7 @@
           return h('ul', { class: 'compact-list' }, x.open.map(function (r) {
             var e = ctx.lookups.entitiesById[r.entityId];
             var info = D.dueInfo(r, ctx.today);
-            return h('li', null, r.title, h('span', { class: 'muted small' }, ' (' + (e ? e.name : '—') + (r.assignee ? '، ' + r.assignee : '') + ')'), ' ', info.kind === 'overdue' ? B.dom.badge(info.short, 'danger') : null);
+            return h('li', null, r.title, h('span', { class: 'muted small' }, ' (' + (e ? e.name : '—'), r.assignee ? ['، ', U.person(r.assignee)] : null, ')'), ' ', info.kind === 'overdue' ? B.dom.badge(info.short, 'danger') : null);
           }));
         } },
         { label: 'أسئلة مفتوحة', cell: function (x) { return String(x.questions.length); } }
