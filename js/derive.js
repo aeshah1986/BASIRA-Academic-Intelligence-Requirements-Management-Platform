@@ -112,6 +112,62 @@
     return model.hasValueConflict(indicator);
   }
 
+  // المؤشرات المعطلة لا تدخل في الجاهزية ولا المُدخل ولا الخطر.
+  function activeIndicators(list) {
+    return list.filter(function (i) { return i.active !== false; });
+  }
+
+  function countPhrase(n, one, two, few, many) {
+    if (n === 1) return one;
+    if (n === 2) return two;
+    if (n >= 3 && n <= 10) return n + ' ' + few;
+    return n + ' ' + many;
+  }
+
+  /*
+   * حالة التصنيف (C-RANK-DAYS وC-RISK): الأيام المتبقية، والجاهزية، والإنجاز، والخطر بأسباب مكتوبة.
+   */
+  function rankingStatus(data, rankingId, today) {
+    var rk = (data.rankings || []).filter(function (r) { return r.id === rankingId; })[0] || { id: rankingId, submissionDeadline: '' };
+    var inds = activeIndicators(data.indicators.filter(function (i) { return i.ranking === rankingId; }));
+    var ids = {};
+    inds.forEach(function (i) { ids[i.id] = true; });
+    var reqs = data.requirements.filter(function (r) { return ids[r.indicatorId]; });
+    var open = reqs.filter(isOpen);
+    var overdue = open.filter(function (r) { return dueInfo(r, today).kind === 'overdue'; }).length;
+    var afterDeadline = rk.submissionDeadline ? open.filter(function (r) { return r.deadline > rk.submissionDeadline; }).length : 0;
+    var days = rk.submissionDeadline ? format.daysBetween(today, rk.submissionDeadline) : null;
+    var readiness = indicatorReadiness(inds);
+    var reasons = [];
+    if (overdue) reasons.push(countPhrase(overdue, 'متطلب واحد متأخر', 'متطلبان متأخران', 'متطلبات متأخرة', 'متطلبًا متأخرًا'));
+    if (afterDeadline) reasons.push(countPhrase(afterDeadline, 'متطلب واحد', 'متطلبان', 'متطلبات', 'متطلبًا') + ' موعده بعد موعد التسليم');
+    if (days !== null && days >= 0 && days <= 14 && readiness !== null && readiness < 50) {
+      reasons.push('الجاهزية ' + readiness + '% مع بقاء ' + (days === 0 ? 'يوم التسليم' : format.dayCount(days)));
+    }
+    if (days !== null && days < 0) reasons.push('انتهى موعد التسليم منذ ' + format.dayCount(days));
+    return {
+      deadline: rk.submissionDeadline || '', days: days, readiness: readiness, progress: requirementProgress(reqs),
+      entered: enteredCount(inds), total: inds.length, overdue: overdue, afterDeadline: afterDeadline,
+      risk: reasons.length > 0, reasons: reasons
+    };
+  }
+
+  /*
+   * C-FUP-DUE: متطلبات غير مكتملة آخر متابعة لها فيها موعد إجراء تالٍ حلّ (≤ اليوم).
+   * المتابعة الأحدث تُلغي موعد ما قبلها.
+   */
+  function dueFollowUps(requirements, today) {
+    var out = [];
+    requirements.forEach(function (r) {
+      if (r.status === 'done') return;
+      var last = lastFollowUp(r);
+      if (last && last.nextActionDate && last.nextActionDate <= today) {
+        out.push({ requirement: r, followUp: last, daysLate: format.daysBetween(last.nextActionDate, today) });
+      }
+    });
+    return out.sort(function (a, b) { return b.daysLate - a.daysLate; });
+  }
+
   return {
     DUE_SOON_DAYS: DUE_SOON_DAYS,
     dueInfo: dueInfo,
@@ -123,6 +179,9 @@
     sortByUrgency: sortByUrgency,
     lastFollowUp: lastFollowUp,
     summaryByEntity: summaryByEntity,
-    hasValueConflict: hasValueConflict
+    hasValueConflict: hasValueConflict,
+    activeIndicators: activeIndicators,
+    rankingStatus: rankingStatus,
+    dueFollowUps: dueFollowUps
   };
 });

@@ -135,7 +135,8 @@ async function openPage(cdp, { beforeLoadScript } = {}) {
 const ROUTES = ['#/dashboard', '#/rankings', '#/rankings?ranking=QS', '#/indicators/ind-ar-edu-1', '#/indicators/ind-ar-edu-1/edit',
   '#/requirements', '#/requirements?due=overdue', '#/requirements/new', '#/requirements/req-f1', '#/requirements/req-f1/edit',
   '#/entities', '#/entities/ent-research', '#/followups', '#/followups?tab=decisions', '#/reports', '#/reports?type=overdue',
-  '#/activity', '#/requirements/missing'];
+  '#/activity', '#/requirements/missing', '#/indicators/new', '#/entities/new', '#/entities/ent-hr/edit', '#/evidence', '#/evidence/new',
+  '#/followups?tab=all', '#/decisions/new', '#/decisions/dec-1/resolve'];
 
 async function sweep(page, label) {
   const problems = [];
@@ -246,7 +247,7 @@ async function run(cdp, tmp) {
   let exported = null;
   if (files.length) exported = JSON.parse(fs.readFileSync(path.join(dlDir, files[0]), 'utf8'));
   check('E-14', 'التصدير ينزّل basira-backup-YYYY-MM-DD.json صالحًا (AC-PER-01)',
-    files[0] === 'basira-backup-' + TODAY + '.json' && exported && exported.schemaVersion === 1 && exported.requirements.length === 7, files.join(',') || 'لم يُنزَّل ملف');
+    files[0] === 'basira-backup-' + TODAY + '.json' && exported && exported.schemaVersion === 2 && exported.requirements.length === 7, files.join(',') || 'لم يُنزَّل ملف');
 
   // E-15 الاستيراد عبر حقل الملف الحقيقي (DOM.setFileInputFiles) — ملف تالف ثم سليم
   async function importFile(filePath) {
@@ -322,8 +323,8 @@ async function run(cdp, tmp) {
     const entities = m.querySelectorAll('tbody tr').length;
     m = await visit('#/rankings'); const arab = m.querySelectorAll('tbody tr').length;
     m = await visit('#/rankings?ranking=QS'); const qs = m.querySelectorAll('tbody tr').length;
-    m = await visit('#/followups'); const followUps = m.querySelectorAll('.timeline li').length;
-    m = await visit('#/followups?tab=decisions'); const decisions = m.querySelectorAll('tbody tr').length;
+    m = await visit('#/followups?tab=all'); const followUps = m.querySelectorAll('.timeline li').length;
+    m = await visit('#/followups?tab=decisions'); const decisions = m.querySelectorAll('.decision-item').length;
     return { kpis, banner, reqCount, entities, indicators: arab + qs, followUps, decisions, labels, sampleAssignees: [...new Set(assignees)].slice(0, 4) };`);
   check('E-21', 'بيانات العرض تُحمَّل افتراضيًا بأسماء دون وسم «وهمي»، ويبقى الشريط العام',
     info.reqCount === 'عدد النتائج: 21 من 21' && info.entities === 9 && info.indicators === 14 && info.decisions === 4 && !info.labels.length && info.banner,
@@ -335,6 +336,203 @@ async function run(cdp, tmp) {
   check('E-24', 'بيانات العرض: لا أخطاء في وحدة التحكم', !demo.errors.length, demo.errors.join(' | ') || 'صفر');
   await cdp.send('Target.closeTarget', { targetId: demo.targetId });
   return pdfPath;
+}
+
+
+// ---------- المرحلة 4: كل وظيفة بمدخلات صحيحة وخاطئة وحذف وعلاقات ----------
+async function runPhase4(cdp) {
+  const p = await openPage(cdp);
+  await p.viewport(1280, 900, false);
+  await p.goto(APP + '#/dashboard');
+  await p.eval("localStorage.removeItem('basira.v1');");
+  await p.goto(APP + '#/dashboard');
+  const setv = (sel, v) => p.eval('const el = document.querySelector(' + JSON.stringify(sel) + '); el.value = ' + JSON.stringify(v) + '; el.dispatchEvent(new Event("change", { bubbles: true })); return true;');
+  const err = id => p.eval('return (document.getElementById(' + JSON.stringify(id) + ') || {}).textContent || "";');
+  const stored = () => p.eval("return JSON.parse(localStorage.getItem('basira.v1') || 'null');");
+  const confirmDialog = label => p.clickSelector('.dialog button', label);
+
+  // P4-01 إنشاء مؤشر، ورفض الرمز المكرر
+  await p.route('#/indicators/new?ranking=ARAB');
+  await setv('[name=domain]', 'البحث العلمي'); await setv('[name=code]', 'ar-res-1'); await setv('[name=name]', 'عدد البحوث المنشورة في Scopus');
+  await p.clickSelector('form button[type=submit]');
+  const created = await p.eval('return { hash: location.hash, h1: document.querySelector("#main h1").textContent };');
+  await p.route('#/indicators/new?ranking=ARAB');
+  await setv('[name=domain]', 'البحث العلمي'); await setv('[name=code]', 'AR-RES-1'); await setv('[name=name]', 'مؤشر مكرر الرمز');
+  await p.clickSelector('form button[type=submit]');
+  const dupErr = await err('n-code-error');
+  check('P4-01', 'إنشاء مؤشر من النموذج، ورفض الرمز المكرر', created.hash === '#/indicators/ind-ar-res-1' && /مستخدم/.test(dupErr), created.hash + ' · ' + dupErr);
+
+  // P4-02 موعد التسليم
+  await p.route('#/rankings?ranking=ARAB');
+  const before = await p.eval('return document.querySelector(".summary-row").textContent;');
+  await p.eval('document.querySelector(".details-toggle").open = true;');
+  await setv('[name=submissionDeadline]', '2026-11-15');
+  await p.clickSelector('.details-toggle button[type=submit]');
+  const after = await p.eval('return document.querySelector(".summary-row").textContent;');
+  // حقل التاريخ في المتصفح لا يقبل تاريخًا غير موجود (يفرغه)، فرفض «2026-02-30» مفحوص في الفحوص الآلية.
+  await p.eval('document.querySelector(".details-toggle").open = true;');
+  await setv('[name=submissionDeadline]', '');
+  await p.clickSelector('.details-toggle button[type=submit]');
+  const cleared = await p.eval('return document.querySelector(".summary-row").textContent;');
+  await p.eval('document.querySelector(".details-toggle").open = true;');
+  await setv('[name=submissionDeadline]', '2026-11-10');
+  await p.clickSelector('.details-toggle button[type=submit]');
+  check('P4-02', 'تعديل موعد التسليم يحدّث الأيام المتبقية، وإفراغه يُظهر «لم يُحدد بعد»', /متبقٍ 9 أيام/.test(before) && /متبقٍ 14 يومًا/.test(after) && /لم يُحدد بعد/.test(cleared), 'قبل: 9 أيام ← بعد: 14 يومًا ← بعد الإفراغ: لم يُحدد');
+
+  // P4-03 تعطيل مؤشر وأثره على العلاقات
+  await p.route('#/indicators/ind-ar-edu-1');
+  await p.clickSelector('#main .page-actions button', 'تعطيل المؤشر');
+  const dlg = await p.eval('return document.querySelector(".dialog__body").textContent;');
+  await confirmDialog('تعطيل المؤشر');
+  const disabledBadge = await p.eval('return /معطل/.test(document.querySelector(".meta-line").textContent);');
+  await p.route('#/requirements/new');
+  const inNewForm = await p.eval('return !!document.querySelector("[name=indicatorId] option[value=\'ind-ar-edu-1\']");');
+  await p.route('#/requirements/req-f1/edit');
+  const inEditForm = await p.eval('return !!document.querySelector("[name=indicatorId] option[value=\'ind-ar-edu-1\']");');
+  await p.route('#/rankings?ranking=ARAB');
+  const listText = await p.eval('return document.querySelector("#main p.muted.small[aria-live]").textContent;');
+  const arab = await p.eval('return document.querySelector(".summary-row").textContent;');
+  check('P4-03', 'تعطيل المؤشر: تأكيد بالأثر، ويختفي من نموذج المتطلب الجديد ويبقى في تعديل متطلبه، ويخرج من الحسابات',
+    /لن يُحذف/.test(dlg) && disabledBadge && !inNewForm && inEditForm && /منها 1 معطل/.test(listText) && /0 من 9/.test(arab), listText + ' · ' + arab.replace(/\s+/g, ' ').slice(0, 60));
+  await p.route('#/indicators/ind-ar-edu-1');
+  await p.clickSelector('#main .page-actions button', 'تفعيل المؤشر');
+  await confirmDialog('تفعيل المؤشر');
+
+  // P4-04 الجهات: مدخلات خاطئة، وإضافة، ومنع حذف المرتبطة، وحذف غير المرتبطة
+  await p.route('#/entities/new');
+  await setv('[name=name]', 'عمادة التقويم'); await setv('[name=contactRole]', 'data@uni.edu');
+  await p.clickSelector('form button[type=submit]');
+  const contactErr = await err('e-contact-error');
+  await setv('[name=name]', '  وحده   البحث العلمي '); await setv('[name=contactRole]', '');
+  await p.clickSelector('form button[type=submit]');
+  const dupName = await err('e-name-error');
+  await setv('[name=name]', 'عمادة التقويم'); await setv('[name=type]', 'deanship'); await setv('[name=contactRole]', 'مدير وحدة البيانات');
+  await p.clickSelector('form button[type=submit]');
+  const entHash = await p.eval('return location.hash;');
+  await p.route('#/entities/ent-research');
+  const blocked = await p.eval('const b = [...document.querySelectorAll("#main .page-actions button")].find(x => x.textContent === "حذف"); return { disabled: b.disabled, reason: document.getElementById("del-reason").textContent };');
+  await p.route(entHash.replace('#', '#'));
+  await p.clickSelector('#main .page-actions button', 'حذف');
+  await confirmDialog('تأكيد الحذف');
+  const afterDel = await p.eval('return { hash: location.hash, count: document.querySelectorAll("#main tbody tr").length };');
+  check('P4-04', 'الجهات: رفض البريد والاسم المكرر، وإضافة، ومنع حذف المرتبطة، وحذف غير المرتبطة',
+    /دون بريد أو هاتف/.test(contactErr) && /بالاسم نفسه/.test(dupName) && /^#\/entities\/ent-/.test(entHash) && blocked.disabled && /مرتبطة بـ 2/.test(blocked.reason) && afterDel.hash === '#/entities' && afterDel.count === 5,
+    JSON.stringify(blocked) + ' · ' + JSON.stringify(afterDel));
+
+  // P4-05 الأدلة: العلاقة بالمتطلب، والرابط الخاطئ، والرفض دون سبب، والتعديل يعيد التحقق
+  await p.route('#/evidence/new?requirement=req-f5');
+  const pre = await p.eval('return { ind: document.querySelector("[name=indicatorId]").value, req: document.querySelector("[name=requirementId]").value };');
+  await setv('[name=title]', 'قائمة الأبحاث بروابط Scopus'); await setv('[name=type]', 'link'); await setv('[name=reference]', 'scopus list');
+  await p.clickSelector('form button[type=submit]');
+  const badLink = await err('v-reference-error');
+  await setv('[name=reference]', 'https://example.org/scopus-list');
+  await p.clickSelector('form button[type=submit]');
+  const evHash = await p.eval('return location.hash;');
+  const pending = await p.eval('return document.querySelector(".meta-line").textContent;');
+  await p.clickSelector('form input[value=rejected]');
+  await p.clickSelector('form button[type=submit]');
+  const noReason = await err('rv-note-error');
+  await setv('[name=note]', 'روابط DOI وليست Scopus');
+  await p.clickSelector('form button[type=submit]');
+  const rejected = await p.eval('return document.querySelector("#main .banner--danger") ? document.querySelector("#main .banner--danger").textContent : "";');
+  await p.route(evHash + '/edit');
+  await setv('[name=reference]', 'https://example.org/scopus-list-v2');
+  await p.clickSelector('form button[type=submit]');
+  const reset = await p.eval('return { status: document.querySelector(".meta-line").textContent, toast: [...document.querySelectorAll(".toast")].map(t => t.textContent).pop() };');
+  check('P4-05', 'الأدلة: تعبئة المؤشر والمتطلب من الرابط، ورفض الرابط الخاطئ والرفض دون سبب، والتعديل يعيد «بانتظار التحقق»',
+    pre.ind === 'ind-ar-edu-8' && pre.req === 'req-f5' && /https/.test(badLink) && /بانتظار التحقق/.test(pending) && /سبب الرفض/.test(noReason) && /روابط DOI/.test(rejected) && /بانتظار التحقق/.test(reset.status) && /عاد الدليل/.test(reset.toast),
+    reset.toast);
+
+  // P4-06 المتابعة بنتيجة وموعد تالٍ، والمستحقة الآن
+  await p.route('#/requirements/req-f2');
+  await setv('[name=note]', 'اتصال بالوحدة'); await setv('[name=outcome]', '');
+  await p.clickSelector('#followups-title ~ div form button[type=submit]');
+  const noOutcome = await err('fu-outcome-error');
+  await setv('[name=outcome]', 'promised'); await setv('[name=nextActionDate]', TODAY); await setv('[name=date]', '2026-10-31');
+  await p.clickSelector('#followups-title ~ div form button[type=submit]');
+  const fuDiag = await p.eval('const f = [...document.querySelectorAll("form")].pop(); return { summary: (f.querySelector(".form-summary") || {}).textContent, errors: [...f.querySelectorAll(".field__error")].map(e => e.id + "=" + e.textContent).filter(x => !/=$/.test(x)), vals: { date: f.date.value, outcome: f.outcome.value, next: f.nextActionDate.value, note: f.note.value }, hash: location.hash };');
+  const fuText = await p.eval('const li = document.querySelector(".timeline li"); return li ? li.textContent : "";');
+  if (!fuText) console.log('تشخيص P4-06: ' + JSON.stringify(fuDiag));
+  await p.route('#/followups?tab=due');
+  const due = await p.eval('return { tab: document.querySelector(".tab[aria-selected=true]").textContent, rows: [...document.querySelectorAll(".timeline li a")].map(a => a.textContent) };');
+  check('P4-06', 'متابعة: رفض غياب النتيجة، وتسجيل «وعد بالتسليم» بموعد تالٍ، وظهورها في «مستحقة الآن»',
+    /نتيجة المتابعة/.test(noOutcome) && /وعد بالتسليم/.test(fuText) && /مستحقة الآن \(1\)/.test(due.tab) && due.rows.includes('بيانات الطلاب الدوليين'), due.tab + ' · ' + due.rows.join('/'));
+
+  // P4-07 الأسئلة والقرارات
+  await p.route('#/decisions/new?indicator=ind-ar-edu-7');
+  await setv('[name=askedTo]', 'لجنة التصنيفات'); await setv('[name=question]', 'هل تُحتسب الاعتمادات المحلية؟'); await setv('[name=askedOn]', '2026-11-09');
+  await p.clickSelector('form button[type=submit]');
+  const futureQ = await err('q-asked-on-error');
+  await setv('[name=askedOn]', '2026-10-29');
+  await p.clickSelector('form button[type=submit]');
+  const openCount = await p.eval('return document.querySelector(".tab[aria-selected=true]").textContent;');
+  const resolveHref = await p.eval('const items = [...document.querySelectorAll(".decision-item")].filter(li => /الاعتمادات المحلية/.test(li.textContent)); return items[0].querySelector("a.btn").getAttribute("href");');
+  await p.route(resolveHref);
+  await setv('[name=decision]', 'الإقليمية والدولية فقط'); await setv('[name=decidedOn]', '2026-10-20');
+  await p.clickSelector('form button[type=submit]');
+  const earlyErr = await err('d-date-error');
+  await setv('[name=decidedOn]', '2026-10-31');
+  await p.clickSelector('form button[type=submit]');
+  const resolved = await p.eval('return [...document.querySelectorAll(".decision-item")].filter(li => /الاعتمادات المحلية/.test(li.textContent))[0].textContent;');
+  check('P4-07', 'سؤال: رفض التاريخ المستقبلي، والإضافة، ورفض قرار قبل تاريخ الطرح، ثم الحسم',
+    /المستقبل/.test(futureQ) && /\(2 مفتوحة\)/.test(openCount) && /بعد تاريخ طرح/.test(earlyErr) && /محسوم/.test(resolved) && /الإقليمية والدولية فقط/.test(resolved), openCount);
+
+  // P4-08 تغيير الحالة السريع وشرط الاكتمال
+  await p.route('#/requirements/req-f6');
+  await setv('#q-status', 'done');
+  await p.clickSelector('.inline-form button[type=submit]');
+  const blockedDone = await err('q-status-error');
+  await setv('#q-status', 'in_progress');
+  await p.clickSelector('.inline-form button[type=submit]');
+  const changed = await p.eval('return document.querySelector(".meta-line").textContent;');
+  check('P4-08', 'تغيير الحالة السريع: «مكتمل» مرفوض بسبب النواقص، و«قيد التنفيذ» مقبول', /لا يمكن إكمال المتطلب/.test(blockedDone) && /قيد التنفيذ/.test(changed), blockedDone);
+
+  // P4-09 حذف متطلب له دليل: الدليل يبقى على المؤشر
+  await p.route('#/requirements/req-f5');
+  await p.clickSelector('#main .page-actions button', 'حذف');
+  const delBody = await p.eval('return document.querySelector(".dialog__body").textContent;');
+  await confirmDialog('تأكيد الحذف');
+  const d9 = await stored();
+  const ev = d9.evidence.find(e => e.title === 'قائمة الأبحاث بروابط Scopus');
+  check('P4-09', 'حذف متطلب له دليل: التأكيد يذكر الدليل، والدليل يبقى على المؤشر دون ربط',
+    /لن تُحذف/.test(delBody) && !d9.requirements.some(r => r.id === 'req-f5') && ev && ev.requirementId === '' && ev.indicatorId === 'ind-ar-edu-8', delBody.slice(0, 90));
+
+  // P4-10 سجل الأنشطة
+  await p.route('#/activity');
+  const log = await p.eval('return { count: document.querySelector(".result-count").textContent, first: document.querySelector(".timeline li p:nth-child(2)").textContent, deleted: [...document.querySelectorAll(".timeline li")].some(li => /حُذف المتطلب/.test(li.textContent) && /\\(محذوف\\)/.test(li.textContent)) };');
+  await setv('[name=type]', 'entity'); await sleep(200);
+  const entLog = await p.eval('return [...document.querySelectorAll(".timeline li p:nth-child(2)")].map(x => x.textContent);');
+  const n = +((log.count.match(/\d+/) || [0])[0]);
+  check('P4-10', 'سجل الأنشطة: كل العمليات الناجحة مسجلة، والمحذوف «(محذوف)»، والتصفية حسب النوع',
+    // 16 عملية ناجحة بالضبط في السيناريوهات P4-01..09، و9 محاولات فاشلة متعمدة لم تُسجَّل (AC-LOG-02)
+    n === 16 && log.deleted && entLog.length === 2 && entLog.every(t => /الجهة/.test(t)), log.count + ' · آخر نشاط: ' + log.first);
+
+  // P4-11 الاستمرار بعد التحديث
+  const snapshot = await stored();
+  await p.goto(APP + '#/evidence');
+  const again = await stored();
+  const evRows = await p.eval('return document.querySelectorAll("#main tbody tr").length;');
+  check('P4-11', 'كل التغييرات باقية بعد إعادة التحميل', JSON.stringify(again) === JSON.stringify(snapshot) && evRows === 1 && again.schemaVersion === 2, 'أدلة: ' + evRows + ' · أنشطة: ' + again.activities.length);
+
+  // P4-12 استيراد نسخة v1 عبر حقل الملف
+  const v1 = JSON.parse(JSON.stringify(again));
+  v1.schemaVersion = 1; delete v1.rankings; delete v1.evidence; delete v1.activities;
+  const v1Path = require('path').join(require('os').tmpdir(), 'basira-v1-' + Date.now() + '.json');
+  fs.writeFileSync(v1Path, JSON.stringify(v1));
+  await p.clickSelector('#data-button');
+  const { root } = await p.send('DOM.getDocument', { depth: -1 });
+  const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#import-file' });
+  await p.send('DOM.setFileInputFiles', { nodeId, files: [v1Path] });
+  await sleep(400);
+  const v1Body = await p.eval('return document.querySelector(".dialog__body").textContent;');
+  await confirmDialog('استبدال البيانات');
+  const migrated = await stored();
+  fs.rmSync(v1Path, { force: true });
+  check('P4-12', 'استيراد نسخة بالإصدار 1: التأكيد يذكر الترقية، وتُحفظ بالإصدار 2 ويُسجَّل الاستيراد',
+    /الإصدار 1 وسيُرقّى/.test(v1Body) && migrated.schemaVersion === 2 && migrated.rankings.length === 2 && /رُقّيت من الإصدار 1/.test(migrated.activities[0].summary), migrated.activities[0].summary);
+
+  check('P4-13', 'لا أخطاء في وحدة التحكم طوال سيناريوهات المرحلة 4', !p.errors.length, p.errors.join(' | ') || 'صفر');
+  await cdp.send('Target.closeTarget', { targetId: p.targetId });
 }
 
 // ---------- التشغيل ----------
@@ -358,6 +556,7 @@ async function main() {
     cdp = createClient(version.webSocketDebuggerUrl);
     await cdp.opened;
     const pdfPath = await run(cdp, tmp);
+    await runPhase4(cdp);
     if (ARTIFACTS) console.log('\nPDF الطباعة: ' + pdfPath);
   } catch (err) {
     check('E-ERR', 'خطأ في تشغيل الفحص', false, err.message);

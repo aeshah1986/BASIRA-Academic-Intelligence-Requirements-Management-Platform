@@ -32,14 +32,22 @@
       currentValue: '',
       progressFileValue: '',
       lastYearValue: '',
-      notes: ''
+      notes: '',
+      valueSource: '',
+      active: true
     };
     return Object.assign(base, extra || {});
   }
 
   var SAMPLE = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     isSample: true,
+
+    // مواعيد تسليم وهمية معتمدة في التصميم (docs/design/03 §6): عند 2026-11-01 يتبقى 9 أيام للعربي و56 يومًا لـ QS.
+    rankings: [
+      { id: 'ARAB', name: 'التصنيف العربي للجامعات', submissionDeadline: '2026-11-10', cycleLabel: 'دورة 2026' },
+      { id: 'QS', name: 'QS', submissionDeadline: '2026-12-27', cycleLabel: 'دورة 2027' }
+    ],
 
     entities: [
       { id: 'ent-hr', name: 'وحدة الموارد البشرية' },
@@ -186,7 +194,10 @@
         decision: '',
         decidedOn: ''
       }
-    ]
+    ],
+
+    evidence: [],
+    activities: []
   };
 
   // نسخة جديدة في كل مرة حتى لا تُعدَّل البيانات الأصلية عن طريق الخطأ.

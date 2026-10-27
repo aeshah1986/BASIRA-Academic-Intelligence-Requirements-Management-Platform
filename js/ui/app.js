@@ -56,6 +56,11 @@
     return false;
   }
 
+  // بيئة عمليات js/actions.js: اليوم، والوقت الآن، ومولد المعرّفات.
+  function env() {
+    return { today: state.today, now: new Date().toISOString(), newId: newId };
+  }
+
   function newId(prefix) {
     return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
   }
@@ -119,6 +124,8 @@
 
   // ---------- حوار «البيانات» ----------
   function exportBackup() {
+    B.actions.logEvent(state.data, env(), 'export', 'صُدّرت نسخة احتياطية.');
+    save();
     var file = B.storage.exportJson(state.data, state.today);
     var blob = new Blob([file.text], { type: 'application/json;charset=utf-8' });
     var link = h('a', { href: URL.createObjectURL(blob), download: file.filename });
@@ -126,6 +133,12 @@
     link.click();
     setTimeout(function () { URL.revokeObjectURL(link.href); link.remove(); }, 0);
     toast('نُزّلت النسخة الاحتياطية: ' + file.filename, 'success');
+  }
+
+  function importSummary(name, parsed) {
+    var s = B.storage.summarize(parsed.data);
+    return 'سيحل محتوى الملف «' + name + '» محل كل البيانات الحالية. في الملف: ' + countRequirements(s.requirements) + '، و' + s.indicators + ' مؤشرًا، و' + s.entities + ' جهات، و' + s.evidence + ' أدلة، و' + s.activities + ' نشاطًا في السجل' +
+      (parsed.migratedFrom ? '. الملف بالإصدار 1 وسيُرقّى تلقائيًا' : '') + '. يُستحسن تصدير نسخة احتياطية أولًا.';
   }
 
   function importBackup(fileInput) {
@@ -140,12 +153,13 @@
       }
       confirmDialog({
         title: 'استبدال البيانات الحالية؟',
-        body: 'سيحل محتوى الملف «' + file.name + '» محل كل البيانات الحالية (في الملف ' + countRequirements(parsed.data.requirements.length) + '). يُستحسن تصدير نسخة احتياطية أولًا.',
+        body: importSummary(file.name, parsed),
         confirmLabel: 'استبدال البيانات',
         danger: true
       }).then(function (ok) {
         if (!ok) { toast('أُلغي الاستيراد ولم تتغير البيانات.', 'info'); return; }
         state.data = parsed.data;
+        B.actions.logEvent(state.data, env(), 'import', 'استُوردت البيانات من «' + file.name + '»' + (parsed.migratedFrom ? ' (رُقّيت من الإصدار 1)' : '') + '.');
         save('استُوردت البيانات من «' + file.name + '».');
         render(true);
       });
@@ -164,6 +178,8 @@
       if (!ok) return;
       var result = store.resetToSample();
       state.data = result.data;
+      B.actions.logEvent(state.data, env(), 'reset', 'أُعيدت البيانات التجريبية.');
+      save();
       if (result.ok) toast('أُعيدت البيانات التجريبية.', 'success');
       else toast(result.message, 'error');
       render(true);
@@ -198,6 +214,7 @@
   var ROUTES = [
     { re: /^\/dashboard$/, view: 'dashboard', nav: 'dashboard' },
     { re: /^\/rankings$/, view: 'rankings', nav: 'rankings' },
+    { re: /^\/indicators\/new$/, view: 'indicatorNew', nav: 'rankings' },
     { re: /^\/indicators\/([^/]+)\/edit$/, view: 'indicatorEdit', nav: 'rankings' },
     { re: /^\/indicators\/([^/]+)$/, view: 'indicator', nav: 'rankings' },
     { re: /^\/requirements$/, view: 'requirements', nav: 'requirements' },
@@ -205,7 +222,15 @@
     { re: /^\/requirements\/([^/]+)\/edit$/, view: 'requirementForm', nav: 'requirements' },
     { re: /^\/requirements\/([^/]+)$/, view: 'requirement', nav: 'requirements' },
     { re: /^\/entities$/, view: 'entities', nav: 'entities' },
+    { re: /^\/entities\/new$/, view: 'entityForm', nav: 'entities' },
+    { re: /^\/entities\/([^/]+)\/edit$/, view: 'entityForm', nav: 'entities' },
     { re: /^\/entities\/([^/]+)$/, view: 'entity', nav: 'entities' },
+    { re: /^\/evidence$/, view: 'evidenceList', nav: 'evidence' },
+    { re: /^\/evidence\/new$/, view: 'evidenceForm', nav: 'evidence' },
+    { re: /^\/evidence\/([^/]+)\/edit$/, view: 'evidenceForm', nav: 'evidence' },
+    { re: /^\/evidence\/([^/]+)$/, view: 'evidenceItem', nav: 'evidence' },
+    { re: /^\/decisions\/new$/, view: 'decisionForm', nav: 'followups' },
+    { re: /^\/decisions\/([^/]+)\/resolve$/, view: 'decisionResolve', nav: 'followups' },
     { re: /^\/followups$/, view: 'followups', nav: 'followups' },
     { re: /^\/reports$/, view: 'reports', nav: 'reports' },
     { re: /^\/activity$/, view: 'activity', nav: 'activity' }
@@ -216,6 +241,7 @@
     { key: 'rankings', href: '#/rankings', label: 'التصنيفات والمؤشرات', short: 'المؤشرات', icon: 'chart', mobile: true },
     { key: 'requirements', href: '#/requirements', label: 'المتطلبات', short: 'المتطلبات', icon: 'list', mobile: true },
     { key: 'entities', href: '#/entities', label: 'الجهات والمسؤوليات', short: 'الجهات', icon: 'building' },
+    { key: 'evidence', href: '#/evidence', label: 'الأدلة', short: 'الأدلة', icon: 'shield' },
     { key: 'followups', href: '#/followups', label: 'المتابعات', short: 'المتابعات', icon: 'chat', mobile: true },
     { key: 'reports', href: '#/reports', label: 'التقارير', short: 'التقارير', icon: 'file' },
     { key: 'activity', href: '#/activity', label: 'سجل الأنشطة', short: 'السجل', icon: 'clock' }
@@ -313,6 +339,7 @@
       go: go,
       setQuery: setQuery,
       newId: newId,
+      env: env,
       rerender: function () { render(true); }
     };
 

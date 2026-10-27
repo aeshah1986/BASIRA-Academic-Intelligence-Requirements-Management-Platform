@@ -9,25 +9,17 @@
   var D = B.derive;
 
   function rankingCard(ctx, code) {
-    var d = ctx.data;
-    var indicators = d.indicators.filter(function (i) { return i.ranking === code; });
-    var ids = {};
-    indicators.forEach(function (i) { ids[i.id] = true; });
-    var reqs = d.requirements.filter(function (r) { return ids[r.indicatorId]; });
-    var overdue = reqs.filter(function (r) { return D.dueInfo(r, ctx.today).kind === 'overdue'; }).length;
-    var readiness = D.indicatorReadiness(indicators);
-    var progress = D.requirementProgress(reqs);
-
-    // البنية v2 (موعد التسليم لكل تصنيف) لم تُنفذ بعد: لا يُعرض عد تنازلي مختلق.
+    var st = D.rankingStatus(ctx.data, code, ctx.today);
     return h('a', { href: '#/rankings?ranking=' + code, class: 'card card--link rank-card' },
       h('div', { class: 'rank-card__head' },
         h('h2', { class: 'card__title' }, U.rankingName(code)),
-        overdue ? B.dom.badge('يحتاج انتباهًا', 'danger') : null),
-      h('p', { class: 'muted small' }, 'موعد التسليم: لم يُحدد بعد'),
-      h('p', { class: 'rank-card__entered' }, 'مُدخل في المنصة: ' + D.enteredCount(indicators) + ' من ' + indicators.length),
-      B.dom.progress('جاهزية المؤشرات', readiness),
-      B.dom.progress('إنجاز المتطلبات', progress.pct),
-      overdue ? h('p', { class: 'rank-card__reason' }, B.dom.icon('alert'), overdue === 1 ? 'متطلب واحد متأخر' : overdue === 2 ? 'متطلبان متأخران' : overdue + ' متطلبات متأخرة') : null);
+        st.risk ? B.dom.badge('في خطر', 'danger') : st.deadline ? B.dom.badge('على المسار', 'success') : null),
+      h('p', { class: 'muted small' }, 'موعد التسليم: ' + (st.deadline ? B.format.formatDate(st.deadline) : 'لم يُحدد بعد')),
+      st.days !== null ? h('p', { class: 'big' }, st.days >= 0 ? 'متبقٍ ' + B.format.dayCount(st.days) : 'انتهى الموعد') : null,
+      h('p', { class: 'rank-card__entered' }, 'مُدخل في المنصة: ' + st.entered + ' من ' + st.total),
+      B.dom.progress('جاهزية المؤشرات', st.readiness),
+      B.dom.progress('إنجاز المتطلبات', st.progress.pct),
+      st.risk ? h('p', { class: 'rank-card__reason' }, B.dom.icon('alert'), st.reasons.join(' · ')) : null);
   }
 
   function kpi(value, label, href, tone) {

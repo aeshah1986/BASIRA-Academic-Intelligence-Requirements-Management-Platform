@@ -281,7 +281,7 @@ a.kpi:hover { border-color: var(--turq-500); color: var(--text); }
 .entity-bars__text { white-space: nowrap; color: var(--text-muted); }
 
 /* ---------- التبويبات ---------- */
-.tabs { display: flex; gap: 4px; border-block-end: 2px solid var(--border); margin-block-end: 16px; overflow-x: auto; }
+.tabs { display: flex; gap: 4px; border-block-end: 2px solid var(--border); margin-block-end: 16px; overflow-x: auto; overflow-y: hidden; }
 .tab {
   padding: 10px 16px; min-block-size: 44px; display: inline-flex; align-items: center;
   color: var(--text-muted); text-decoration: none; font-weight: 600;
@@ -371,7 +371,9 @@ textarea.input { resize: vertical; line-height: 1.6; }
 .banner[hidden] { display: none; }
 
 .toasts {
-  position: fixed; inset-block-end: 16px; inset-inline-start: 16px; z-index: 60;
+  /* أسفل اليسار (inline-end في RTL) بعيدًا عن أزرار النماذج التي تبدأ من اليمين،
+     والنقرات تمر عبر الرسائل إلا زر إغلاقها (كانت الرسالة تغطي زر «إضافة المتابعة»). */
+  position: fixed; inset-block-end: 16px; inset-inline-end: 16px; z-index: 60; pointer-events: none;
   display: grid; gap: 8px; max-inline-size: min(420px, calc(100vw - 32px));
 }
 .toast {
@@ -385,7 +387,7 @@ textarea.input { resize: vertical; line-height: 1.6; }
 .toast--error { border-inline-start-color: var(--danger); }
 .toast--error .icon { color: var(--danger); }
 .toast__text { flex: 1; }
-.toast__close { background: none; border: 0; cursor: pointer; color: var(--text-muted); min-block-size: 32px; min-inline-size: 32px; }
+.toast__close { pointer-events: auto; background: none; border: 0; cursor: pointer; color: var(--text-muted); min-block-size: 32px; min-inline-size: 32px; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .dialog {
@@ -397,6 +399,21 @@ textarea.input { resize: vertical; line-height: 1.6; }
 .dialog__box { padding: 22px; display: grid; gap: 14px; }
 .dialog__title { font-size: 19px; }
 .dialog__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- نماذج داخل الصفحة وعناصر المرحلة 4 ---------- */
+.inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.inline-form .field { min-inline-size: 180px; flex: 1 1 180px; }
+.inline-form .form-summary { flex-basis: 100%; }
+.details-toggle { margin-block-start: 12px; border-block-start: 1px solid var(--navy-100); padding-block-start: 10px; }
+.details-toggle summary { cursor: pointer; font-weight: 600; color: var(--turq-700); min-block-size: 44px; display: flex; align-items: center; }
+.details-toggle[open] summary { margin-block-end: 8px; }
+.link-button--danger { color: var(--danger); }
+.evidence-item, .decision-item { display: grid; gap: 4px; padding-block-end: 10px; border-block-end: 1px solid var(--navy-100); }
+.evidence-item:last-child, .decision-item:last-child { border-block-end: 0; }
+.evidence-item__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.decision-item .btn { justify-self: start; }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
+.rank-card .big { margin: 0; }
 
 /* ---------- التقارير ---------- */
 .report { display: grid; gap: 12px; }
@@ -509,3 +526,6 @@ textarea.input { resize: vertical; line-height: 1.6; }
 }
 
 .nowrap { white-space: nowrap; }
+
+/* رموز المؤشرات والقيم القصيرة في الجداول لا تنقسم عند الشرطة (AR-EDU-3) */
+.rtable td .ltr { white-space: nowrap; }

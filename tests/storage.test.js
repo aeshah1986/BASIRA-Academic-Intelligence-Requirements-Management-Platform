@@ -43,7 +43,8 @@ test('AC-PER-01 (المنطق): ملف التصدير باسم مؤرخ ويحت
   const file = exportJson(data, '2026-11-01');
   assert.equal(file.filename, 'basira-backup-2026-11-01.json');
   const parsed = JSON.parse(file.text);
-  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.schemaVersion, 2); // البنية v2 منذ المرحلة 4
+  assert.ok(parsed.exportedAt);
   assert.equal(parsed.requirements.length, 6);
   assert.equal(parsed.indicators.length, 12);
   assert.equal(parsed.decisions.length, 1);
@@ -54,6 +55,7 @@ test('AC-PER-02: تصدير ثم استيراد يعيد البيانات نفس
   data.requirements[1].followUps.push({ id: 'fu-x', date: '2026-10-28', note: 'ملاحظة "بعلامات تنصيص"، وفاصلة' });
   const imported = parseImport(exportJson(data, '2026-11-01').text);
   assert.equal(imported.ok, true);
+  delete imported.data.exportedAt; // يضيفه التصدير فقط
   assert.deepEqual(imported.data, data);
 });
 

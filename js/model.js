@@ -116,7 +116,42 @@
     return current !== '' && progress !== '' && current !== progress;
   }
 
+  var ENTITY_TYPES = { deanship: 'عمادة', vice_presidency: 'وكالة', department: 'إدارة', unit: 'وحدة', college: 'كلية', center: 'مركز', other: 'أخرى' };
+  var FOLLOWUP_TYPES = { call: 'اتصال', letter: 'خطاب', meeting: 'اجتماع', email: 'بريد', other: 'أخرى' };
+  var FOLLOWUP_OUTCOMES = {
+    no_reply: 'لا رد بعد',
+    promised: 'وعد بالتسليم',
+    partial: 'تسليم جزئي',
+    delivered: 'تسليم كامل',
+    declined: 'اعتذار أو رفض',
+    other: 'أخرى'
+  };
+  var EVIDENCE_TYPES = { file: 'ملف', link: 'رابط', letter: 'خطاب رسمي', template: 'نموذج معبأ', other: 'أخرى' };
+  var EVIDENCE_STATUSES = { pending: 'بانتظار التحقق', verified: 'متحقق منه', rejected: 'مرفوض' };
+
+  function isHttpUrl(value) {
+    return typeof value === 'string' && /^https?:\/\/[^\s<>"']+$/i.test(value.trim());
+  }
+
+  // بريد إلكتروني أو رقم هاتف داخل نص (خصوصية: R-V-NO-CONTACT).
+  function hasContactInfo(text) {
+    var s = String(text == null ? '' : text);
+    return /[\w.+-]+@[\w-]+\.[\w.]+/.test(s) || /\+?\d[\d\s-]{7,}\d/.test(s);
+  }
+
+  function isEnum(map, value) {
+    return Object.prototype.hasOwnProperty.call(map, value);
+  }
+
   return {
+    ENTITY_TYPES: ENTITY_TYPES,
+    FOLLOWUP_TYPES: FOLLOWUP_TYPES,
+    FOLLOWUP_OUTCOMES: FOLLOWUP_OUTCOMES,
+    EVIDENCE_TYPES: EVIDENCE_TYPES,
+    EVIDENCE_STATUSES: EVIDENCE_STATUSES,
+    isHttpUrl: isHttpUrl,
+    hasContactInfo: hasContactInfo,
+    isEnum: isEnum,
     RANKINGS: RANKINGS,
     STATUSES: STATUSES,
     PRIORITIES: PRIORITIES,

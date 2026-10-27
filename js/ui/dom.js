@@ -52,7 +52,8 @@
     alert: ['M12 3l10 18H2z', 'M12 10v4', 'M12 17h.01'],
     check: ['M5 12l5 5 9-10'],
     chevron: ['M15 6l-6 6 6 6'],
-    empty: ['M3 7h18v13H3z', 'M3 7l3-4h12l3 4', 'M9 12h6']
+    empty: ['M3 7h18v13H3z', 'M3 7l3-4h12l3 4', 'M9 12h6'],
+    shield: ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', 'M9 12l2 2 4-4']
   };
 
   function icon(name, extraClass) {

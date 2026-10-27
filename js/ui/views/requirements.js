@@ -1,6 +1,6 @@
 /*
  * المتطلبات — #/requirements، و#/requirements/:id، و#/requirements/new، و#/requirements/:id/edit
- * (docs/design/01 §3)
+ * (docs/design/01 §3). كل تغيير عبر js/actions.js.
  */
 (function (root) {
   'use strict';
@@ -9,11 +9,11 @@
   var U = B.ui;
   var D = B.derive;
   var M = B.model;
+  var A = B.actions;
 
   var DUE_OPTIONS = [{ value: 'overdue', label: 'متأخر' }, { value: 'soon', label: 'قريب الموعد (7 أيام)' }];
   var STATUS_FILTER = [{ value: 'open', label: 'كل غير المكتمل' }].concat(U.optionsFromMap(M.STATUSES));
   var SORTS = [{ value: 'urgency', label: 'الأكثر إلحاحًا' }, { value: 'deadline', label: 'الموعد الأقرب' }, { value: 'updated', label: 'آخر تحديث' }];
-  var FOLLOWUP_TYPES = { call: 'اتصال', letter: 'خطاب', meeting: 'اجتماع', email: 'بريد', other: 'أخرى' };
 
   function sortList(list, sort, today) {
     if (sort === 'deadline') return list.slice().sort(function (a, b) { return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0; });
@@ -30,6 +30,7 @@
 
     var results = h('div', { class: 'results' });
     var counter = h('p', { class: 'result-count', role: 'status', 'aria-live': 'polite' });
+    var form;
 
     function refresh() {
       var list = B.query.filterRequirements(d.requirements, state, { indicatorsById: ctx.lookups.indicatorsById, today: ctx.today });
@@ -52,7 +53,6 @@
       el.addEventListener(name === 'q' ? 'input' : 'change', function () {
         state[name] = el.value;
         if (name === 'ranking') {
-          // تصفية المؤشرات حسب التصنيف المختار
           var indSel = form.querySelector('[name="indicator"]');
           var fresh = U.selectControl('indicator', U.indicatorOptions(d.indicators, state.ranking), '', 'كل المؤشرات');
           fresh.id = indSel.id;
@@ -67,12 +67,13 @@
     }
 
     var search = control('q', h('input', { type: 'search', name: 'q', class: 'input input--search', value: state.q, placeholder: 'بحث في العنوان والوصف والنواقص', autocomplete: 'off', dir: 'auto' }));
-    var form = h('form', { class: 'filters', role: 'search', onsubmit: function (e) { e.preventDefault(); } },
+    search.id = 'q';
+    form = h('form', { class: 'filters', role: 'search', onsubmit: function (e) { e.preventDefault(); } },
       h('div', { class: 'search-box' },
         h('label', { for: 'q', class: 'visually-hidden' }, 'بحث في المتطلبات'),
         B.dom.icon('search', 'search-box__icon'), search),
       h('div', { class: 'filters__grid' },
-        U.field({ id: 'f-ranking', name: 'ranking', label: 'التصنيف', control: control('ranking', U.selectControl('ranking', [{ value: 'ARAB', label: U.rankingName('ARAB') }, { value: 'QS', label: 'QS' }], state.ranking, 'الكل')) }),
+        U.field({ id: 'f-ranking', name: 'ranking', label: 'التصنيف', control: control('ranking', U.selectControl('ranking', (d.rankings || []).map(function (r) { return { value: r.id, label: r.name }; }), state.ranking, 'الكل')) }),
         U.field({ id: 'f-indicator', name: 'indicator', label: 'المؤشر', control: control('indicator', U.selectControl('indicator', U.indicatorOptions(d.indicators, state.ranking), state.indicator, 'كل المؤشرات')) }),
         U.field({ id: 'f-entity', name: 'entity', label: 'الجهة', control: control('entity', U.selectControl('entity', d.entities.map(function (e) { return { value: e.id, label: e.name }; }), state.entity, 'كل الجهات')) }),
         U.field({ id: 'f-status', name: 'status', label: 'الحالة', control: control('status', U.selectControl('status', STATUS_FILTER, state.status, 'الكل')) }),
@@ -82,7 +83,6 @@
       h('div', { class: 'filters__actions' },
         counter,
         h('button', { type: 'button', class: 'btn btn--ghost btn--small', onclick: function () { clearAll(); } }, 'مسح الكل')));
-    search.id = 'q';
 
     function clearAll() {
       // replaceState لا يطلق hashchange، فلا يُعاد الرسم مرتين ولا يضيع التركيز.
@@ -105,23 +105,39 @@
     if (!r) return U.notFoundState('المتطلب', '#/requirements', 'العودة إلى المتطلبات');
     var ind = ctx.lookups.indicatorsById[r.indicatorId];
     var ent = ctx.lookups.entitiesById[r.entityId];
-    var link = r.evidenceLink && /^https?:\/\//i.test(r.evidenceLink) ? r.evidenceLink : '';
+    var link = r.evidenceLink && M.isHttpUrl(r.evidenceLink) ? r.evidenceLink : '';
+    var evidence = (ctx.data.evidence || []).filter(function (e) { return e.requirementId === r.id; });
 
     function remove() {
-      var n = (r.followUps || []).length;
+      var impact = A.requirementImpact(ctx.data, r.id);
       ctx.confirm({
         title: 'حذف المتطلب؟',
-        body: 'سيُحذف المتطلب «' + r.title + '»' + (n ? ' ومتابعاته (' + n + ')' : '') + ' نهائيًا من هذا المتصفح.',
+        body: 'سيُحذف المتطلب «' + r.title + '» نهائيًا' + (impact.followUps ? ' ومعه متابعاته (' + impact.followUps + ')' : '') + '.' +
+          (impact.evidence ? ' الأدلة المرتبطة به (' + impact.evidence + ') لن تُحذف، وتبقى على المؤشر دون ربط بمتطلب.' : ''),
         confirmLabel: 'تأكيد الحذف',
         danger: true
       }).then(function (ok) {
         if (!ok) return;
-        var idx = ctx.data.requirements.indexOf(r);
-        if (idx !== -1) ctx.data.requirements.splice(idx, 1);
+        var res = A.deleteRequirement(ctx.data, r.id, ctx.env());
+        if (!res.ok) { ctx.toast(res.message, 'error'); return; }
         ctx.save('حُذف المتطلب «' + r.title + '».');
         ctx.go('#/requirements');
       });
     }
+
+    // تغيير الحالة السريع (تُطبق شروط الاكتمال).
+    var statusForm = h('form', { class: 'inline-form', novalidate: true },
+      h('p', { class: 'form-summary banner banner--danger', role: 'alert', hidden: true }),
+      U.field({ id: 'q-status', name: 'status', label: 'تغيير الحالة', control: U.selectControl('status', U.optionsFromMap(M.STATUSES), r.status) }),
+      h('button', { type: 'submit', class: 'btn btn--secondary' }, 'تطبيق'));
+    statusForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var res = A.setRequirementStatus(ctx.data, r.id, statusForm.elements.status.value, ctx.env());
+      if (!U.handle(statusForm, res, ctx)) return;
+      if (res.info && res.info.unchanged) { ctx.toast('الحالة كما هي.', 'info'); return; }
+      ctx.save('غُيّرت الحالة إلى «' + M.STATUSES[r.status] + '».');
+      ctx.rerender();
+    });
 
     var checklist = h('ul', { class: 'checklist' },
       h('li', { class: r.missingData ? 'is-no' : 'is-yes' }, B.dom.icon(r.missingData ? 'close' : 'check'), r.missingData ? 'توجد بيانات ناقصة مسجلة' : 'لا نواقص مسجلة'),
@@ -129,7 +145,7 @@
 
     var info = h('dl', { class: 'details' },
       h('div', null, h('dt', null, 'الوصف'), h('dd', null, r.description || h('span', { class: 'muted' }, 'لا وصف'))),
-      h('div', null, h('dt', null, 'المؤشر'), h('dd', null, ind ? h('a', { href: '#/indicators/' + encodeURIComponent(ind.id) }, B.dom.ltr(ind.code), ' · ', ind.name) : '—')),
+      h('div', null, h('dt', null, 'المؤشر'), h('dd', null, ind ? [h('a', { href: '#/indicators/' + encodeURIComponent(ind.id) }, B.dom.ltr(ind.code), ' · ', ind.name), ind.active === false ? [' ', B.dom.badge('المؤشر معطل', 'neutral')] : null] : '—')),
       h('div', null, h('dt', null, 'الجهة المسؤولة'), h('dd', null, ent ? h('a', { href: '#/entities/' + encodeURIComponent(ent.id) }, ent.name) : '—')),
       h('div', null, h('dt', null, 'المكلَّف'), h('dd', null, U.person(r.assignee))),
       h('div', null, h('dt', null, 'الموعد النهائي'), h('dd', null, B.format.formatDate(r.deadline), ' ', U.dueBadge(r, ctx.today))),
@@ -145,46 +161,56 @@
       h('p', { class: 'meta-line' }, U.statusBadge(r.status), ' ', U.priorityBadge(r.priority), r.status === 'done' ? null : [' ', U.dueBadge(r, ctx.today)]),
       h('div', { class: 'grid grid--main-side' },
         U.card('البيانات', info),
-        U.card('شروط الاكتمال', h('div', null, checklist,
-          h('p', { class: 'muted small' }, 'لاكتمال المتطلب: لا نواقص، ورابط دليل.')))),
+        h('div', { class: 'stack' },
+          U.card('الحالة', statusForm),
+          U.card('شروط الاكتمال', h('div', null, checklist, h('p', { class: 'muted small' }, 'لاكتمال المتطلب: لا نواقص، ورابط دليل.'))))),
+      U.card('الأدلة (' + evidence.length + ')', h('div', { class: 'stack' },
+        evidence.length ? U.evidenceList(ctx, evidence) : h('p', { class: 'muted' }, 'لا أدلة مسجلة لهذا المتطلب.'),
+        ind && ind.active !== false ? h('a', { href: '#/evidence/new?requirement=' + encodeURIComponent(r.id), class: 'btn btn--secondary' }, B.dom.icon('plus'), 'تسجيل دليل لهذا المتطلب') : null)),
       followUpsCard(ctx, r));
   };
 
   function followUpsCard(ctx, r) {
     var list = U.sortedFollowUps(r);
     var form = h('form', { class: 'form form--compact', novalidate: true },
-      h('h3', { class: 'card__subtitle' }, 'إضافة متابعة'),
+      h('h3', { class: 'card__subtitle' }, 'تسجيل مراسلة أو متابعة'),
       h('p', { class: 'form-summary banner banner--danger', role: 'alert', hidden: true }),
       h('div', { class: 'form-grid' },
         U.field({ id: 'fu-date', name: 'date', label: 'التاريخ', required: true, control: h('input', { type: 'date', name: 'date', class: 'input', value: ctx.today, max: ctx.today }) }),
-        U.field({ id: 'fu-type', name: 'type', label: 'النوع', required: true, control: U.selectControl('type', U.optionsFromMap(FOLLOWUP_TYPES), 'call') }),
+        U.field({ id: 'fu-type', name: 'type', label: 'النوع', required: true, control: U.selectControl('type', U.optionsFromMap(M.FOLLOWUP_TYPES), 'call') }),
+        U.field({ id: 'fu-outcome', name: 'outcome', label: 'النتيجة', required: true, control: U.selectControl('outcome', U.optionsFromMap(M.FOLLOWUP_OUTCOMES), '', 'اختيار النتيجة') }),
+        U.field({ id: 'fu-next', name: 'nextActionDate', label: 'موعد الإجراء التالي', hint: 'اختياري: يظهر المتطلب في «مستحقة الآن» عند حلوله.', control: h('input', { type: 'date', name: 'nextActionDate', class: 'input' }) }),
         U.field({ id: 'fu-note', name: 'note', label: 'الملاحظة', required: true, wide: true, control: h('textarea', { name: 'note', class: 'input', rows: '2', maxlength: '1100', dir: 'auto' }) })),
       h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'btn btn--secondary' }, 'إضافة المتابعة')));
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var date = form.elements.date.value;
-      var type = form.elements.type.value;
-      var note = form.elements.note.value.replace(/\s+/g, ' ').trim();
-      var errors = {};
-      if (!M.isValidDate(date)) errors.date = 'التاريخ غير صالح.';
-      else if (date > ctx.today) errors.date = 'لا يمكن تسجيل تاريخ في المستقبل.';
-      if (!Object.prototype.hasOwnProperty.call(FOLLOWUP_TYPES, type)) errors.type = 'النوع غير معروف.';
-      if (note.length < 3) errors.note = 'يرجى كتابة ملاحظة من 3 أحرف على الأقل.';
-      else if (note.length > 1000) errors.note = 'النص أطول من 1000 حرف.';
-      if (!U.showErrors(form, errors)) return;
-      r.followUps = r.followUps || [];
-      r.followUps.push({ id: ctx.newId('fu'), date: date, type: type, note: note });
-      r.updatedAt = new Date().toISOString();
+      var f = form.elements;
+      var res = A.addFollowUp(ctx.data, r.id, { date: f.date.value, type: f.type.value, outcome: f.outcome.value, note: f.note.value, nextActionDate: f.nextActionDate.value }, ctx.env());
+      if (!U.handle(form, res, ctx)) return;
       ctx.save('أُضيفت المتابعة.');
       ctx.rerender();
     });
 
-    return U.card('سجل المتابعات (' + list.length + ')', h('div', { class: 'stack' },
+    function removeFollowUp(fu) {
+      ctx.confirm({ title: 'حذف المتابعة؟', body: 'ستُحذف متابعة ' + B.format.formatDate(fu.date) + ' («' + fu.note + '»).', confirmLabel: 'تأكيد الحذف', danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          var res = A.deleteFollowUp(ctx.data, r.id, fu.id, ctx.env());
+          if (!res.ok) { ctx.toast(res.message, 'error'); return; }
+          ctx.save('حُذفت المتابعة.');
+          ctx.rerender();
+        });
+    }
+
+    return U.card('سجل المراسلات والمتابعات (' + list.length + ')', h('div', { class: 'stack' },
       list.length ? h('ol', { class: 'timeline' }, list.map(function (f) {
         return h('li', null,
-          h('p', { class: 'timeline__head' }, h('span', { class: 'strong' }, B.format.formatDate(f.date)), f.type ? B.dom.badge(FOLLOWUP_TYPES[f.type] || f.type, 'neutral') : null),
-          h('p', null, f.note));
+          h('p', { class: 'timeline__head' }, h('span', { class: 'strong' }, B.format.formatDate(f.date)),
+            f.type ? B.dom.badge(M.FOLLOWUP_TYPES[f.type] || f.type, 'neutral') : null, U.outcomeBadge(f.outcome)),
+          h('p', null, f.note),
+          f.nextActionDate ? h('p', { class: 'muted small' }, 'الإجراء التالي: ' + B.format.formatDate(f.nextActionDate)) : null,
+          h('button', { type: 'button', class: 'link-button link-button--danger small', onclick: function () { removeFollowUp(f); } }, 'حذف المتابعة'));
       })) : h('p', { class: 'muted' }, 'لا متابعات بعد. يمكن تسجيل أول تواصل مع الجهة من النموذج أدناه.'),
       form), { id: 'followups-title' });
   }
@@ -200,12 +226,13 @@
     };
     var preInd = ctx.lookups.indicatorsById[r.indicatorId];
     var ranking = preInd ? preInd.ranking : '';
+    var keepId = editing ? editing.indicatorId : null;
     var backHref = editing ? '#/requirements/' + encodeURIComponent(editing.id) : (preInd ? '#/indicators/' + encodeURIComponent(preInd.id) : '#/requirements');
 
-    var rankingSel = U.selectControl('ranking', [{ value: 'ARAB', label: U.rankingName('ARAB') }, { value: 'QS', label: 'QS' }], ranking, 'كل التصنيفات');
-    var indicatorSel = U.selectControl('indicatorId', U.indicatorOptions(d.indicators, ranking), r.indicatorId, 'اختيار المؤشر');
+    var rankingSel = U.selectControl('ranking', (d.rankings || []).map(function (x) { return { value: x.id, label: x.name }; }), ranking, 'كل التصنيفات');
+    var indicatorSel = U.selectControl('indicatorId', U.indicatorOptions(d.indicators, ranking, { activeOnly: true, keepId: keepId }), r.indicatorId, 'اختيار المؤشر');
     rankingSel.addEventListener('change', function () {
-      var fresh = U.selectControl('indicatorId', U.indicatorOptions(d.indicators, rankingSel.value), '', 'اختيار المؤشر');
+      var fresh = U.selectControl('indicatorId', U.indicatorOptions(d.indicators, rankingSel.value, { activeOnly: true, keepId: keepId }), '', 'اختيار المؤشر');
       fresh.id = indicatorSel.id;
       fresh.setAttribute('aria-describedby', indicatorSel.getAttribute('aria-describedby'));
       fresh.setAttribute('aria-required', 'true');
@@ -224,7 +251,7 @@
       h('div', { class: 'form-grid' },
         U.field({ id: 'r-title', name: 'title', label: 'العنوان', required: true, wide: true, hint: 'من 3 إلى 150 حرفًا.', control: h('input', { type: 'text', name: 'title', class: 'input', maxlength: '160', value: r.title, dir: 'auto' }) }),
         U.field({ id: 'r-ranking', name: 'ranking', label: 'التصنيف', hint: 'لتصفية قائمة المؤشرات فقط.', control: rankingSel }),
-        U.field({ id: 'r-indicator', name: 'indicatorId', label: 'المؤشر', required: true, control: indicatorSel }),
+        U.field({ id: 'r-indicator', name: 'indicatorId', label: 'المؤشر', required: true, hint: 'المؤشرات المعطلة لا تظهر هنا.', control: indicatorSel }),
         U.field({ id: 'r-entity', name: 'entityId', label: 'الجهة المسؤولة', required: true, control: U.selectControl('entityId', d.entities.map(function (e) { return { value: e.id, label: e.name }; }), r.entityId, 'اختيار الجهة') }),
         U.field({ id: 'r-assignee', name: 'assignee', label: 'المكلَّف', control: h('input', { type: 'text', name: 'assignee', class: 'input', maxlength: '90', value: r.assignee || '', dir: 'auto' }) }),
         U.field({ id: 'r-deadline', name: 'deadline', label: 'الموعد النهائي', required: true, control: h('input', { type: 'date', name: 'deadline', class: 'input', value: r.deadline }) }),
@@ -247,36 +274,12 @@
       var input = {
         title: f.title.value, description: f.description.value, indicatorId: indicatorSel.value,
         entityId: f.entityId.value, assignee: f.assignee.value, deadline: f.deadline.value,
-        status: f.status.value, priority: checked ? checked.value : '', missingData: f.missingData.value
+        status: f.status.value, priority: checked ? checked.value : '', missingData: f.missingData.value, evidenceLink: f.evidenceLink.value
       };
-      var result = M.validateRequirement(input, { indicators: d.indicators, entities: d.entities });
-      var errors = result.errors;
-      var v = result.value;
-      if (!errors.title && (v.title.length < 3 || v.title.length > 150)) errors.title = 'العنوان يجب أن يكون بين 3 و150 حرفًا.';
-      if (v.description.length > 2000) errors.description = 'النص أطول من 2000 حرف.';
-      if (v.missingData.length > 1000) errors.missingData = 'النص أطول من 1000 حرف.';
-      if (v.assignee.length > 80) errors.assignee = 'النص أطول من 80 حرفًا.';
-      var link = f.evidenceLink.value.trim();
-      if (link && !/^https?:\/\/[^\s]+$/i.test(link)) errors.evidenceLink = 'الرابط يجب أن يبدأ بـ https:// أو http:// (يُرفض غير ذلك للأمان).';
-      // شرط الاكتمال R-COMPLETE-REQ يُطبق عند الانتقال إلى «مكتمل» فقط.
-      var becomingDone = v.status === 'done' && (!editing || editing.status !== 'done');
-      if (becomingDone && !errors.status) {
-        var missing = [];
-        if (v.missingData) missing.push('حذف البيانات الناقصة أو تحديثها');
-        if (!link || errors.evidenceLink) missing.push('إضافة رابط الدليل');
-        if (missing.length) errors.status = 'لا يمكن إكمال المتطلب: يلزم ' + missing.join('، و') + '.';
-      }
-      if (!U.showErrors(form, errors)) return;
-
-      var now = new Date().toISOString();
-      var target = editing || { id: ctx.newId('req'), createdAt: now, followUps: [] };
-      Object.keys(v).forEach(function (k) { target[k] = v[k]; });
-      target.evidenceLink = link;
-      target.updatedAt = now;
-      if (becomingDone) target.completedAt = now;
-      if (!editing) d.requirements.push(target);
-      ctx.save(editing ? 'حُفظت التعديلات.' : 'أُضيف المتطلب «' + target.title + '».');
-      ctx.go('#/requirements/' + encodeURIComponent(target.id));
+      var res = editing ? A.updateRequirement(d, editing.id, input, ctx.env()) : A.createRequirement(d, input, ctx.env());
+      if (!U.handle(form, res, ctx)) return;
+      ctx.save(editing ? 'حُفظت التعديلات.' : 'أُضيف المتطلب «' + input.title.replace(/\s+/g, ' ').trim() + '».');
+      ctx.go('#/requirements/' + encodeURIComponent(res.id));
     });
 
     return h('div', null,
@@ -284,6 +287,4 @@
       U.pageHeader(editing ? 'تعديل المتطلب' : 'إضافة متطلب', 'الحقول المعلَّمة بـ * إلزامية.'),
       form);
   };
-
-  B.ui.FOLLOWUP_TYPES = FOLLOWUP_TYPES;
 })(window);

@@ -39,7 +39,7 @@
   function indicator(id, code, ranking, domain, order, name, extra) {
     return Object.assign({
       id: id, code: code, ranking: ranking, domain: domain, order: order, name: name,
-      workStatus: 'not_started', currentValue: '', progressFileValue: '', lastYearValue: '', valueSource: '', notes: ''
+      workStatus: 'not_started', currentValue: '', progressFileValue: '', lastYearValue: '', valueSource: '', notes: '', active: true
     }, extra || {});
   }
 
@@ -100,16 +100,16 @@
         createdAt: at(offsets.created), updatedAt: at(offsets.updated), followUps: []
       }, fields, { deadline: d(offsets.deadline) });
     }
-    function fu(id, offset, type, note) { return { id: id, date: d(offset), type: type, note: note }; }
+    function fu(id, offset, type, note, outcome, next) { return { id: id, date: d(offset), type: type, outcome: outcome || 'no_reply', note: note, nextActionDate: next === undefined ? '' : d(next) }; }
 
     var requirements = [
       req({ title: 'حصر أعضاء هيئة التدريس حسب الرتبة ونوع التفرغ', description: 'حصر المعينين والمعارين والمتعاقدين مع فصل المتفرغين عن غير المتفرغين لاحتساب العدد المكافئ للدوام الكامل.',
         indicatorId: 'ind-ar-edu-1', entityId: 'ent-faculty', assignee: 'د. خالد الشهري', status: 'in_progress', priority: 'high', missingData: 'أعداد غير المتفرغين لاحتساب FTE',
-        followUps: [fu('fu-demo-01', -14, 'letter', 'أُرسل خطاب طلب الحصر إلى العمادة مع نموذج التعبئة.'), fu('fu-demo-02', -5, 'call', 'أفادت العمادة بأن الحصر سيُسلَّم خلال أسبوع.')] },
+        followUps: [fu('fu-demo-01', -14, 'letter', 'أُرسل خطاب طلب الحصر إلى العمادة مع نموذج التعبئة.'), fu('fu-demo-02', -5, 'call', 'أفادت العمادة بأن الحصر سيُسلَّم خلال أسبوع.', 'promised', -1)] },
         { created: -20, updated: -5, deadline: -9 }),
       req({ title: 'أعداد الطلبة المقيدين في جميع المراحل', description: 'أعداد الدبلوم والبكالوريوس والدراسات العليا لسنة البيانات، بالعدد الفعلي للطلبة.',
         indicatorId: 'ind-ar-edu-1', entityId: 'ent-admission', assignee: 'د. نورة الزهراني', status: 'waiting', priority: 'high', missingData: 'أعداد طلبة الدكتوراه',
-        followUps: [fu('fu-demo-03', -8, 'letter', 'خطاب طلب الأعداد مع توضيح شمول طلبة الماجستير والدكتوراه.'), fu('fu-demo-04', -1, 'meeting', 'طُلب فصل أعداد الدكتوراه في جدول مستقل.')] },
+        followUps: [fu('fu-demo-03', -8, 'letter', 'خطاب طلب الأعداد مع توضيح شمول طلبة الماجستير والدكتوراه.'), fu('fu-demo-04', -1, 'meeting', 'طُلب فصل أعداد الدكتوراه في جدول مستقل.', 'partial', 3)] },
         { created: -18, updated: -1, deadline: -4 }),
       req({ title: 'التحقق من تعارض عدد الأعضاء مع ملف التقدم', description: 'مقارنة الرقم المحسوب من النظام بالرقم المسجل في ملف التقدم وتحديد مصدر كل منهما.',
         indicatorId: 'ind-ar-edu-1', entityId: 'ent-quality', assignee: 'د. ريم الحربي', status: 'in_progress', priority: 'high', missingData: 'مصدر الرقم المسجل في ملف التقدم' },
@@ -130,19 +130,19 @@
         { created: -35, updated: -21, deadline: -20 }),
       req({ title: 'بيانات الخبراء المنتدبين من الكليات', description: 'تعبئة نموذج المؤشر 6 من كل كلية: الخبير، والجهة، ونوع الدور، والمقرر، والمؤهل.',
         indicatorId: 'ind-ar-edu-6', entityId: 'ent-graduate', assignee: 'د. هند الغامدي', status: 'waiting', priority: 'high', missingData: 'ردود 4 كليات على خطاب الطلب',
-        followUps: [fu('fu-demo-05', -12, 'letter', 'خطاب إلى عمداء الكليات بطلب بيانات الخبراء.'), fu('fu-demo-06', -7, 'email', 'تذكير ثانٍ للكليات التي لم ترد.')] },
+        followUps: [fu('fu-demo-05', -12, 'letter', 'خطاب إلى عمداء الكليات بطلب بيانات الخبراء.'), fu('fu-demo-06', -7, 'email', 'تذكير ثانٍ للكليات التي لم ترد.', 'partial', 0)] },
         { created: -16, updated: -7, deadline: -6 }),
       req({ title: 'خطاب طلب بيانات الخبراء من الكليات الصحية', indicatorId: 'ind-ar-edu-6', entityId: 'ent-quality', assignee: 'د. منى القرني', status: 'in_progress', priority: 'high' },
         { created: -3, updated: -1, deadline: 1 }),
       req({ title: 'حصر الاعتمادات البرامجية الإقليمية والدولية', description: 'الاعتمادات السارية خلال سنة التصنيف مع شهاداتها.',
         indicatorId: 'ind-ar-edu-7', entityId: 'ent-quality', assignee: 'د. منى القرني', status: 'in_progress', priority: 'high', missingData: 'شهادات اعتماد 3 برامج',
-        followUps: [fu('fu-demo-07', -10, 'meeting', 'اتُّفق على استبعاد الاعتمادات المحلية حتى يصدر القرار.')] },
+        followUps: [fu('fu-demo-07', -10, 'meeting', 'اتُّفق على استبعاد الاعتمادات المحلية حتى يصدر القرار.', 'other')] },
         { created: -15, updated: -10, deadline: -2 }),
       req({ title: 'حذف الاعتمادات المكررة من القائمة', indicatorId: 'ind-ar-edu-7', entityId: 'ent-quality', assignee: 'د. ريم الحربي', status: 'new', priority: 'medium' },
         { created: -1, updated: -1, deadline: 6 }),
       req({ title: 'استكمال روابط Scopus للأبحاث بمشاركة طلبة البكالوريوس', description: 'استبدال روابط DOI بروابط Scopus يظهر فيها اسم الطالب.',
         indicatorId: 'ind-ar-edu-8', entityId: 'ent-research', assignee: 'د. عبدالله السبيعي', status: 'in_progress', priority: 'high', missingData: 'روابط Scopus لـ 11 بحثًا',
-        followUps: [fu('fu-demo-08', -3, 'call', 'جارٍ استبدال الروابط، وأُنجز نصفها تقريبًا.')] },
+        followUps: [fu('fu-demo-08', -3, 'call', 'جارٍ استبدال الروابط، وأُنجز نصفها تقريبًا.', 'partial', 2)] },
         { created: -9, updated: -3, deadline: 4 }),
       req({ title: 'التحقق من ظهور أسماء الطلبة في قائمة المؤلفين', indicatorId: 'ind-ar-edu-8', entityId: 'ent-students', assignee: 'د. لمى الدوسري', status: 'new', priority: 'low' },
         { created: -2, updated: -2, deadline: 12 }),
@@ -174,7 +174,27 @@
         askedTo: 'وكيل الجامعة للدراسات العليا', askedOn: d(-2), status: 'open', decision: '', decidedOn: '' }
     ];
 
-    return { schemaVersion: 1, isSample: true, entities: entities, indicators: indicators, requirements: requirements, decisions: decisions };
+    var rankings = [
+      { id: 'ARAB', name: 'التصنيف العربي للجامعات', submissionDeadline: d(9), cycleLabel: 'دورة العرض' },
+      { id: 'QS', name: 'QS', submissionDeadline: d(56), cycleLabel: 'دورة العرض' }
+    ];
+
+    var ev = function (id, indicatorId, requirementId, title, type, reference, status, reviewNote, reviewedOffset) {
+      return { id: id, indicatorId: indicatorId, requirementId: requirementId, title: title, type: type, reference: reference, notes: '',
+        status: status, reviewNote: reviewNote || '', reviewedOn: reviewedOffset === undefined ? '' : d(reviewedOffset), createdAt: at(-12), updatedAt: at(-3) };
+    };
+    var evidence = [
+      ev('ev-demo-1', 'ind-ar-edu-3', 'req-demo-05', 'نموذج المؤشر 3 بعد التعبئة', 'template', 'مجلد التصنيفات ← التعليم والتعلم ← المؤشر 3', 'verified', 'العدد مطابق لقائمة البرامج المعتمدة.', -11),
+      ev('ev-demo-2', 'ind-ar-edu-5', 'req-demo-08', 'تقرير SciVal لمعامل هيرش', 'link', 'https://example.org/basira/evidence/scival-report', 'verified', 'أدنى معامل في القائمة أقل من العتبة، فالعد مكتمل.', -19),
+      ev('ev-demo-3', 'ind-ar-edu-1', 'req-demo-01', 'خطاب العمادة بأعداد أعضاء هيئة التدريس', 'letter', 'بانتظار رقم الصادر من العمادة', 'pending'),
+      ev('ev-demo-4', 'ind-ar-edu-7', 'req-demo-11', 'شهادات الاعتماد البرامجي', 'file', 'مجلد الاعتمادات ← دورة العرض', 'rejected', 'ثلاث شهادات منتهية الصلاحية قبل سنة التصنيف.', -4),
+      ev('ev-demo-5', 'ind-ar-edu-8', 'req-demo-13', 'قائمة الأبحاث بروابط Scopus', 'template', 'نموذج المؤشر 8 (نسخة العمل)', 'pending'),
+      ev('ev-demo-6', 'ind-ar-edu-4', 'req-demo-06', 'توصيف البرامج البينية', 'file', 'ملفات توصيف البرامج من وكالة الدراسات العليا', 'pending'),
+      ev('ev-demo-7', 'ind-ar-edu-2', '', 'خطاب حصر حملة الدكتوراه', 'letter', 'مسودة لدى عمادة التطوير والجودة', 'pending')
+    ];
+
+    return { schemaVersion: 2, isSample: true, rankings: rankings, entities: entities, indicators: indicators, requirements: requirements,
+      decisions: decisions, evidence: evidence, activities: [] };
   }
 
   return { createDemoData: createDemoData };

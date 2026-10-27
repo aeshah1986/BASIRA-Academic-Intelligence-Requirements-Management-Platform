@@ -134,15 +134,69 @@
     return count === 0;
   }
 
+  /*
+   * نتيجة عملية من js/actions.js على نموذج: عند الفشل تُعرض أخطاء الحقول، أو الرسالة العامة
+   * إن لم يكن الخطأ في حقل بعينه (مثل «غير موجود»). يعيد true عند النجاح فقط.
+   */
+  function handle(form, res, ctx) {
+    if (res && res.ok) { showErrors(form, {}); return true; }
+    var errors = (res && res.errors) || {};
+    showErrors(form, errors);
+    if (!Object.keys(errors).length) {
+      var summary = form.querySelector('.form-summary');
+      var msg = (res && res.message) || 'تعذر الحفظ.';
+      if (summary) { summary.textContent = msg; summary.hidden = false; }
+      if (ctx) ctx.toast(msg, 'error');
+    }
+    return false;
+  }
+
+  var EVIDENCE_TONE = { pending: 'warning', verified: 'success', rejected: 'danger' };
+  function evidenceBadge(status) { return B.dom.badge(M.EVIDENCE_STATUSES[status] || status, EVIDENCE_TONE[status] || 'neutral'); }
+  function outcomeBadge(outcome) {
+    if (!outcome) return null;
+    var tone = outcome === 'delivered' ? 'success' : outcome === 'declined' ? 'danger' : outcome === 'no_reply' ? 'warning' : 'info';
+    return B.dom.badge(M.FOLLOWUP_OUTCOMES[outcome] || outcome, tone);
+  }
+
+  // قائمة أدلة مختصرة (صفحات المؤشر والمتطلب والأدلة).
+  function evidenceList(ctx, list) {
+    return h('ul', { class: 'plain-list' }, list.map(function (ev) {
+      var req = ev.requirementId ? ctx.lookups.requirementsById[ev.requirementId] : null;
+      return h('li', { class: 'evidence-item' },
+        h('p', { class: 'evidence-item__head' },
+          h('a', { href: '#/evidence/' + encodeURIComponent(ev.id), class: 'strong' }, ev.title), ' ',
+          evidenceBadge(ev.status), ' ', B.dom.badge(M.EVIDENCE_TYPES[ev.type] || ev.type, 'neutral')),
+        h('p', { class: 'muted small' }, req ? ['المتطلب: ', h('a', { href: '#/requirements/' + encodeURIComponent(req.id) }, req.title)] : 'غير مرتبط بمتطلب',
+          ev.reviewNote ? ' · ' + ev.reviewNote : ''));
+    }));
+  }
+
+  // سؤال أو قرار، مع رابط الحسم إن كان مفتوحًا.
+  function decisionItem(ctx, q, showIndicator) {
+    var ind = ctx.lookups.indicatorsById[q.indicatorId];
+    var age = B.format.daysBetween(q.askedOn, ctx.today);
+    return h('li', { class: 'decision-item' },
+      h('p', { class: 'strong' }, q.question),
+      h('p', { class: 'muted small' },
+        showIndicator && ind ? [h('a', { href: '#/indicators/' + encodeURIComponent(ind.id) }, B.dom.ltr(ind.code)), ' · '] : null,
+        'موجه إلى: ', q.askedTo, ' · ', B.format.formatDate(q.askedOn), ' · ',
+        q.status === 'open' ? B.dom.badge('مفتوح' + (age > 0 ? ' منذ ' + B.format.dayCount(age) : ''), 'warning') : B.dom.badge('محسوم', 'success')),
+      q.status === 'resolved' ? h('p', null, 'القرار (' + B.format.formatDate(q.decidedOn) + '): ', q.decision)
+        : h('a', { href: '#/decisions/' + encodeURIComponent(q.id) + '/resolve', class: 'btn btn--secondary btn--small' }, 'تسجيل القرار'));
+  }
+
   function optionsFromMap(map) {
     return Object.keys(map).map(function (k) { return { value: k, label: map[k] }; });
   }
 
   // خيارات المؤشرات مجمعة حسب التصنيف والمعيار، مع تصفية اختيارية بالتصنيف.
-  function indicatorOptions(indicators, ranking) {
+  // opts.activeOnly: يستبعد المؤشرات المعطلة إلا opts.keepId (المؤشر الحالي عند التعديل).
+  function indicatorOptions(indicators, ranking, opts) {
     var groups = {};
     var order = [];
-    indicators.filter(function (i) { return !ranking || i.ranking === ranking; })
+    opts = opts || {};
+    indicators.filter(function (i) { return (!ranking || i.ranking === ranking) && (!opts.activeOnly || i.active !== false || i.id === opts.keepId); })
       .slice().sort(function (a, b) { return a.ranking === b.ranking ? (a.order || 0) - (b.order || 0) : a.ranking < b.ranking ? -1 : 1; })
       .forEach(function (i) {
         var g = rankingName(i.ranking) + ' — ' + i.domain;
@@ -174,6 +228,11 @@
     field: field,
     selectControl: selectControl,
     showErrors: showErrors,
+    handle: handle,
+    evidenceBadge: evidenceBadge,
+    outcomeBadge: outcomeBadge,
+    evidenceList: evidenceList,
+    decisionItem: decisionItem,
     optionsFromMap: optionsFromMap,
     indicatorOptions: indicatorOptions,
     sortedFollowUps: sortedFollowUps
