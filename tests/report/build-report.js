@@ -147,7 +147,23 @@ rcheck('R-05', 'كل مرحلة منفذة (0–5) موثقة في WORK_LOG.md (
 const pkg = ['index.html', 'README.md', 'CLAUDE.md', '.claude/skills/basira-review/SKILL.md', 'TEST_LOG.md'];
 const missingPkg = pkg.filter(f => !fs.existsSync(path.join(ROOT, f)));
 rcheck('R-06', 'حزمة التسليم: index.html وREADME وCLAUDE.md ومهارة المراجعة وسجل الاختبار (AC-DOC-04)', !missingPkg.length, missingPkg.length ? 'ناقص: ' + missingPkg.join('، ') : 'كلها موجودة');
-// إعادة حل الحالات المرتبطة بـ R-04..06
+// R-07..09: أدوات الجودة (فحص بنيوي للملفات، لا استدعاء للمهارة أو الوكيل)
+const readIf = f => (fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), 'utf8') : '');
+const skill = readIf('.claude/skills/basira-review/SKILL.md');
+rcheck('R-07', 'مهارة المراجعة: وصف محدد، وخطوات تشغيل، وقالب مخرج بأعمدة الحالة / المتوقع / الفعلي / الدليل، وقسم «ما لم أستطع فحصه» (AC-QA-01)',
+  /^---\s*\nname: basira-review\s*\ndescription: .{40,}/m.test(skill) && /\| # \| الحالة \| المتوقع \| الفعلي \| الدليل \|/.test(skill) && /ما لم أستطع فحصه/.test(skill) && /node --test/.test(skill),
+  skill ? 'الملف موجود (' + skill.split('\n').length + ' سطرًا)' : 'الملف مفقود');
+const agent = readIf('.claude/agents/basira-text-reviewer.md');
+const tools = (agent.match(/^tools:\s*(.+)$/m) || [])[1] || '';
+rcheck('R-08', 'مراجع النصوص: أدواته قراءة فقط (Read وGrep وGlob)، وتعليماته تمنع التعديل (AC-QA-03)',
+  agent && tools.split(',').map(t => t.trim()).every(t => ['Read', 'Grep', 'Glob'].includes(t)) && /لا تعدّل أي ملف/.test(agent), 'tools: ' + (tools || '—'));
+const reviewsDir = path.join(ROOT, 'docs', 'reviews');
+const reviews = fs.existsSync(reviewsDir) ? fs.readdirSync(reviewsDir).filter(f => /^review-\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort() : [];
+const lastReview = reviews.length ? fs.readFileSync(path.join(reviewsDir, reviews[reviews.length - 1]), 'utf8') : '';
+rcheck('R-09', 'تقرير تشغيل مهارة المراجعة محفوظ بالقالب: الجدول، و«ما لم أستطع فحصه»، والحكم (AC-QA-01)',
+  /\| # \| الحالة \| المتوقع \| الفعلي \| الدليل \|/.test(lastReview) && /ما لم أستطع فحصه/.test(lastReview) && /## الحكم/.test(lastReview),
+  reviews.length ? 'docs/reviews/' + reviews[reviews.length - 1] : 'لا تقرير');
+// إعادة حل الحالات المرتبطة بـ R-04..09
 rows.forEach(r => {
   r.resolved = r.resolved.concat(r.missing.map(id => resolve(id)).filter(x => x && !x.pending));
   r.missing = r.missing.filter(id => !resolve(id) || resolve(id).pending);
@@ -206,7 +222,7 @@ L.push('## 2. الملخص', '');
 L.push('| المقياس | النتيجة |', '|---|---|');
 L.push('| الفحوص الآلية (`node --test`) | **' + unitTests.filter(t => t.ok).length + ' ناجح / ' + unitTests.filter(t => !t.ok).length + ' فاشل** من ' + unitTests.length + ' |');
 L.push('| فحوص المتصفح (`browser-check.js`) | **' + e2eResults.filter(r => r.ok).length + ' ناجح / ' + e2eResults.filter(r => !r.ok).length + ' فاشل** من ' + e2eResults.length + ' |');
-L.push('| فحوص README والتسليم (R-01..06) | **' + R.filter(r => r.ok).length + ' ناجح / ' + R.filter(r => !r.ok).length + ' فاشل** من ' + R.length + ' |');
+L.push('| فحوص README والتسليم وأدوات الجودة (R-01..09) | **' + R.filter(r => r.ok).length + ' ناجح / ' + R.filter(r => !r.ok).length + ' فاشل** من ' + R.length + ' |');
 L.push('| حالات القبول | ' + rows.length + ' حالة: **ناجح ' + count('ناجح') + '**، وناجح جزئيًا ' + count('ناجح جزئيًا') + '، وفاشل ' + count('فاشل') + '، وغير منفذ ' + count('غير منفذ') + '، ولم يُختبر ' + count('لم يُختبر') + ' |');
 const mustNI = rows.filter(r => r.priority === 'MUST' && r.status === 'غير منفذ');
 L.push('| حالات MUST غير المنفذة | **' + mustNI.length + '**: ' + mustNI.map(r => r.id.replace('AC-', '')).join('، ') + ' |', '');

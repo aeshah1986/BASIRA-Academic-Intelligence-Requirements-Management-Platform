@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-28T16:25:27.346Z",
+  "ranAt": "2026-10-28T16:48:27.365Z",
   "browser": "Edg/156.0.4314.50",
   "results": [
     {
@@ -66,7 +66,7 @@
       "id": "E-10",
       "name": "إضافة متطلب بعنوان فيه HTML: يُحفظ ويظهر نصًا (AC-CRUD-01، AC-SEC-01)",
       "ok": true,
-      "detail": "{\"hash\":\"#/requirements/req-mvsbq4a9-w6zo\",\"h1\":\"<img src=x onerror=alert(1)> اختبار e2e\",\"imgs\":0,\"stored\":7}"
+      "detail": "{\"hash\":\"#/requirements/req-mvscjpe5-cufy\",\"h1\":\"<img src=x onerror=alert(1)> اختبار e2e\",\"imgs\":0,\"stored\":7}"
     },
     {
       "id": "E-11",
@@ -228,7 +228,7 @@
       "id": "P4-12",
       "name": "استيراد نسخة بالإصدار 1: التأكيد يذكر الترقية، وتُحفظ بالإصدار 2 ويُسجَّل الاستيراد",
       "ok": true,
-      "detail": "استُوردت البيانات من «basira-v1-1793204643043.json» (رُقّيت من الإصدار 1)."
+      "detail": "استُوردت البيانات من «basira-v1-1793206023362.json» (رُقّيت من الإصدار 1)."
     },
     {
       "id": "P4-13",
@@ -342,7 +342,7 @@
       "id": "Q-04",
       "name": "لوحة المفاتيح فقط: الانتقال بين حقول نموذج المتطلب بـ Tab، وEnter يرسل، والأسهم تختار، والكتابة تملأ التاريخ (AC-UI-05، AC-CRUD-01)",
       "ok": true,
-      "detail": "ترتيب Tab: ranking ← indicatorId ← entityId ← assignee ← deadline ← deadline ← status ← priority ← description ← missingData ← evidenceLink ← حفظ المتطلب ← إلغاء ← انتقل إلى ال · القيم: ind-ar-edu-1 | ent-hr | 2026-10-30 · #/requirements/req-mvsbrzdq-iwgz"
+      "detail": "ترتيب Tab: ranking ← indicatorId ← entityId ← assignee ← deadline ← deadline ← status ← priority ← description ← missingData ← evidenceLink ← حفظ المتطلب ← إلغاء ← انتقل إلى ال · القيم: ind-ar-edu-1 | ent-hr | 2026-10-30 · #/requirements/req-mvsclka7-plol"
     },
     {
       "id": "Q-05",

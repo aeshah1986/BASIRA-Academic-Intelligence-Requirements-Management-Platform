@@ -114,6 +114,21 @@ CLAUDE.md             تعليمات العمل الدائمة لـ Claude Code
   - معظم إضافات سد الفجوات (AC-GAP-02..09).
   - السؤال التلقائي عند الموعد الداخلي، ونموذج تعبئة CSV للجهات (AC-COM-06/10).
   - تصدير قائمة المتطلبات المصفاة (AC-RPT-07).
-  - مهارة المراجعة `.claude/skills/basira-review/` (AC-QA-01..03).
 
-  التفاصيل في `TEST_REPORT.md`.
+  التفاصيل في `TEST_REPORT.md` و`docs/KNOWN_ISSUES.md`.
+
+## 6. التوثيق
+| الملف | المحتوى |
+|---|---|
+| `DELIVERY.md` | **ابدأ هنا للتقييم:** التقرير النهائي، وقائمة الملفات، وطريقة التجربة |
+| `docs/USER_GUIDE.md` | دليل استخدام مختصر بأمثلة عملية على أرقام ثابتة |
+| `TEST_REPORT.md` | نتيجة كل حالة قبول (156)، مولّدة من تشغيل فعلي |
+| `ACCEPTANCE_CRITERIA.md` | حالات القبول وأولوياتها |
+| `docs/RUBRIC.md` | مطابقة معايير التقييم الخمسة مع الدليل والتقدير الذاتي |
+| `docs/KNOWN_ISSUES.md` | المشكلات المعروفة والحدود |
+| `docs/WORKFLOW.md` و`docs/PROMPTS.md` | دورة Plan → Implement → Verify → Commit لكل مرحلة، والطلبات بالخانات الأربع |
+| `docs/PRESENTATION.md` | ملخص العرض أمام المقيّمة |
+| `docs/design/` | التصميم الوظيفي المعتمد (01–09) |
+| `CLAUDE.md`، و`.claude/skills/basira-review/`، و`.claude/agents/` | تعليمات Claude Code، ومهارة المراجعة، ومراجع النصوص (قراءة فقط) |
+| `docs/HOOK_SPEC.md`، و`docs/AUTOMATION_CARD.md`، و`docs/requirements.md` | مواصفة Hook، وبطاقة المهمة الآلية، والمصدر المحلي البديل عن MCP |
+| `PROJECT_PLAN.md`، و`WORK_LOG.md`، و`TEST_LOG.md` | الخطة، وسجل العمل، وسجل الاختبار لكل مرحلة |
