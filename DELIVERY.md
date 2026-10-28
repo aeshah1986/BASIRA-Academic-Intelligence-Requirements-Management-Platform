@@ -65,7 +65,7 @@ node tests/report/build-report.js
 | المجموعة | الملفات |
 |---|---|
 | **التشغيل** | `index.html`، و`css/styles.css`، و`js/` (المنطق: model وstorage وformat وderive وquery وactions وinsights وcsv وnormalize)، و`js/ui/` (app وdom وshared وviews: 10 صفحات)، و`data/` (demo-data.js وsample-data.js، وكلاهما وهمي) |
-| **الشرح والحدود** | `README.md`، و`DELIVERY.md`، و`docs/USER_GUIDE.md`، و`docs/KNOWN_ISSUES.md` |
+| **الشرح والحدود** | `README.md`، و`DELIVERY.md`، و`docs/BASIRA-project-idea.docx` (شرح الفكرة بالتفصيل، Word)، و`docs/USER_GUIDE.md`، و`docs/KNOWN_ISSUES.md` |
 | **تعليمات Claude Code** | `CLAUDE.md`، و`.claude/skills/basira-review/SKILL.md` (مهارة المراجعة)، و`.claude/agents/basira-text-reviewer.md` (مراجع قراءة فقط)، و`docs/HOOK_SPEC.md`، و`docs/AUTOMATION_CARD.md`، و`docs/requirements.md` |
 | **التخطيط والعمل** | `PROJECT_PLAN.md`، و`WORK_LOG.md`، و`docs/WORKFLOW.md`، و`docs/PROMPTS.md`، و`docs/design/01–09` مع `mockups/` |
 | **القبول والاختبار** | `ACCEPTANCE_CRITERIA.md` (156 حالة)، و`TEST_REPORT.md` (المتوقع والفعلي والدليل لكل حالة)، و`TEST_LOG.md`، و`docs/reviews/review-2026-10-28.md`، و`tests/` (13 ملف فحص آلي، و`e2e/`، و`report/` مع `output/` للمخرجات الخام)، و`docs/screenshots/` |
