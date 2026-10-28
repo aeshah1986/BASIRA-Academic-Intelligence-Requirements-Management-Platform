@@ -131,6 +131,11 @@
     if (!req) return fail({}, 'المتطلب غير موجود.');
     var v = { date: clean(input.date), type: clean(input.type), outcome: clean(input.outcome), note: clean(input.note), nextActionDate: clean(input.nextActionDate) };
     var errors = {};
+    var lvl = clean(input.escalationLevel);
+    if (lvl !== '') {
+      if (!/^[0-4]$/.test(lvl)) errors.escalationLevel = 'مستوى التصعيد غير معروف.';
+      else v.escalationLevel = Number(lvl);
+    }
     if (!M.isValidDate(v.date)) errors.date = 'التاريخ غير صالح.';
     else if (v.date > env.today) errors.date = 'لا يمكن تسجيل تاريخ في المستقبل.';
     if (!M.isEnum(M.FOLLOWUP_TYPES, v.type)) errors.type = 'النوع غير معروف.';
@@ -145,7 +150,7 @@
     var fu = Object.assign({ id: env.newId('fu') }, v);
     req.followUps.push(fu);
     req.updatedAt = env.now;
-    log(data, env, 'followup_add', 'requirement', reqId, 'سُجلت متابعة (' + M.FOLLOWUP_TYPES[v.type] + '، ' + M.FOLLOWUP_OUTCOMES[v.outcome] + ') على ' + q(req.title) + '.');
+    log(data, env, 'followup_add', 'requirement', reqId, 'سُجلت متابعة (' + M.FOLLOWUP_TYPES[v.type] + '، ' + M.FOLLOWUP_OUTCOMES[v.outcome] + (v.escalationLevel !== undefined ? '، L' + v.escalationLevel : '') + ') على ' + q(req.title) + '.');
     return { ok: true, id: fu.id };
   }
 
@@ -416,6 +421,73 @@
   }
 
   // ---------- أحداث عامة (استيراد، تصدير، إعادة) ----------
+  // ---------- الخطابات ----------
+  /*
+   * «تسجيل الإرسال»: متابعة واحدة لكل متطلب في الخطاب، بنوع «خطاب» ومستوى التصعيد وموعد الإجراء التالي.
+   * plan = [{ requirementId, nextActionDate }] من insights.buildLetter. الكل أو لا شيء.
+   * لا يرسل شيئًا: يوثق أن المستخدمة أرسلت الخطاب بنفسها.
+   */
+  function recordLetterSent(data, entityId, level, plan, env) {
+    var ent = find(data.entities, entityId);
+    if (!ent) return fail({}, 'الجهة غير موجودة.');
+    if (!/^[0-4]$/.test(String(level))) return fail({}, 'مستوى الخطاب غير معروف.');
+    level = Number(level);
+    if (!Array.isArray(plan) || !plan.length) return fail({}, 'لا بنود في الخطاب.');
+    var targets = [];
+    for (var i = 0; i < plan.length; i++) {
+      var req = find(data.requirements, plan[i].requirementId);
+      if (!req || req.entityId !== entityId || req.status === 'done') return fail({}, 'أحد بنود الخطاب لم يعد مفتوحًا لدى هذه الجهة. يرجى إعادة إعداد الخطاب.');
+      var nd = clean(plan[i].nextActionDate);
+      if (nd && (!M.isValidDate(nd) || nd < env.today)) return fail({}, 'موعد الإجراء التالي غير صالح.');
+      targets.push({ req: req, nextActionDate: nd });
+    }
+    var name = M.ESCALATION_NAMES[level];
+    targets.forEach(function (t) {
+      if (!Array.isArray(t.req.followUps)) t.req.followUps = [];
+      t.req.followUps.push({ id: env.newId('fu'), date: env.today, type: 'letter', outcome: 'no_reply', escalationLevel: level,
+        note: 'أُرسل خطاب L' + level + ' (' + name + ') إلى الجهة، وسُجل من صفحة الخطابات.', nextActionDate: t.nextActionDate });
+      t.req.updatedAt = env.now;
+    });
+    log(data, env, 'letter_sent', 'entity', entityId, 'سُجل إرسال خطاب L' + level + ' (' + name + ') إلى ' + q(ent.name) + ' يضم ' + countWord(targets.length, 'متطلبًا واحدًا', 'متطلبين', 'متطلبات', 'متطلبًا') + '.');
+    return { ok: true, id: entityId, info: { count: targets.length } };
+  }
+
+  var LETTER_CODES = ['L0', 'L1', 'L2', 'L3', 'L4'];
+
+  /*
+   * حفظ قالب خطاب معدّل. unknown = دالة تعيد المتغيرات غير المعروفة (من insights)، تُمرر لتجنب الاعتماد الدائري.
+   */
+  function updateLetterTemplate(data, code, input, env, unknown) {
+    if (LETTER_CODES.indexOf(code) === -1) return fail({}, 'القالب غير معروف.');
+    var v = { subject: clean(input.subject), body: text(input.body).replace(/\r\n/g, '\n') };
+    var errors = {};
+    len(errors, 'subject', v.subject, 200, 3, 'الموضوع');
+    len(errors, 'body', v.body, 4000, 20, 'نص الخطاب');
+    ['subject', 'body'].forEach(function (k) {
+      if (errors[k]) return;
+      if (M.hasContactInfo(v[k])) errors[k] = 'لا يُكتب بريد أو هاتف في القالب، ويُكتفى بالمسميات الوظيفية.';
+      else if (unknown) {
+        var u = unknown(v[k]);
+        if (u.length) errors[k] = 'متغيرات غير معروفة: ' + u.map(function (x) { return '{' + x + '}'; }).join('، ') + '.';
+      }
+    });
+    if (hasErrors(errors)) return fail(errors);
+    if (!data.settings || typeof data.settings !== 'object') data.settings = {};
+    if (!data.settings.letterTemplates || typeof data.settings.letterTemplates !== 'object') data.settings.letterTemplates = {};
+    data.settings.letterTemplates[code] = v;
+    log(data, env, 'template_update', 'template', code, 'عُدّل قالب خطاب ' + code + '.');
+    return { ok: true, id: code };
+  }
+
+  function resetLetterTemplate(data, code, env) {
+    if (LETTER_CODES.indexOf(code) === -1) return fail({}, 'القالب غير معروف.');
+    var t = data.settings && data.settings.letterTemplates;
+    if (!t || !t[code]) return { ok: true, id: code, info: { unchanged: true } };
+    delete t[code];
+    log(data, env, 'template_reset', 'template', code, 'أُعيد قالب خطاب ' + code + ' إلى النص الافتراضي.');
+    return { ok: true, id: code };
+  }
+
   function logEvent(data, env, action, summary) {
     log(data, env, action, 'data', '', summary);
   }
@@ -444,6 +516,9 @@
     deleteEvidence: deleteEvidence,
     addDecision: addDecision,
     resolveDecision: resolveDecision,
+    recordLetterSent: recordLetterSent,
+    updateLetterTemplate: updateLetterTemplate,
+    resetLetterTemplate: resetLetterTemplate,
     logEvent: logEvent
   };
 });

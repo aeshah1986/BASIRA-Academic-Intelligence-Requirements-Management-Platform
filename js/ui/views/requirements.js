@@ -10,6 +10,7 @@
   var D = B.derive;
   var M = B.model;
   var A = B.actions;
+  var I = B.insights;
 
   var DUE_OPTIONS = [{ value: 'overdue', label: 'متأخر' }, { value: 'soon', label: 'قريب الموعد (7 أيام)' }];
   var STATUS_FILTER = [{ value: 'open', label: 'كل غير المكتمل' }].concat(U.optionsFromMap(M.STATUSES));
@@ -139,9 +140,14 @@
       ctx.rerender();
     });
 
-    var checklist = h('ul', { class: 'checklist' },
-      h('li', { class: r.missingData ? 'is-no' : 'is-yes' }, B.dom.icon(r.missingData ? 'close' : 'check'), r.missingData ? 'توجد بيانات ناقصة مسجلة' : 'لا نواقص مسجلة'),
-      h('li', { class: link ? 'is-yes' : 'is-no' }, B.dom.icon(link ? 'check' : 'close'), link ? 'يوجد رابط دليل' : 'لا يوجد رابط دليل'));
+    // شروط الاكتمال وجودة البيانات من محرك التحليل (js/insights.js).
+    var check = I.requirementConditions(r, ctx.data, ctx.today);
+    var checklist = r.status === 'done'
+      ? h('p', { class: 'muted' }, 'المتطلب مكتمل.')
+      : h('ul', { class: 'checklist', id: 'conditions' }, check.conditions.map(function (c) {
+        return h('li', { class: c.met ? 'is-yes' : 'is-no' }, B.dom.icon(c.met ? 'check' : 'close'), c.label,
+          c.group === 'blocking' ? h('span', { class: 'muted small' }, ' (شرط اكتمال)') : null);
+      }));
 
     var info = h('dl', { class: 'details' },
       h('div', null, h('dt', null, 'الوصف'), h('dd', null, r.description || h('span', { class: 'muted' }, 'لا وصف'))),
@@ -163,12 +169,33 @@
         U.card('البيانات', info),
         h('div', { class: 'stack' },
           U.card('الحالة', statusForm),
-          U.card('شروط الاكتمال', h('div', null, checklist, h('p', { class: 'muted small' }, 'لاكتمال المتطلب: لا نواقص، ورابط دليل.'))))),
+          U.card('شروط الاكتمال', h('div', null, checklist, h('p', { class: 'muted small' }, r.status === 'done' ? '' : 'مستوفٍ ' + check.met + ' من ' + check.total + '. لاكتمال المتطلب يلزم الشرطان الأولان.'))))),
+      analysisCard(ctx, r),
       U.card('الأدلة (' + evidence.length + ')', h('div', { class: 'stack' },
         evidence.length ? U.evidenceList(ctx, evidence) : h('p', { class: 'muted' }, 'لا أدلة مسجلة لهذا المتطلب.'),
         ind && ind.active !== false ? h('a', { href: '#/evidence/new?requirement=' + encodeURIComponent(r.id), class: 'btn btn--secondary' }, B.dom.icon('plus'), 'تسجيل دليل لهذا المتطلب') : null)),
       followUpsCard(ctx, r));
   };
+
+  // الخطوة التالية ودرجة الأولوية وسلّم التصعيد، كلها قواعد حسابية تُعرض بأسبابها.
+  function analysisCard(ctx, r) {
+    if (r.status === 'done') return null;
+    var step = I.nextStep(r, ctx.data, ctx.today);
+    var score = I.priorityScore(r, ctx.data, ctx.today);
+    var esc = step.escalation;
+    var escLine = h('p', { class: 'small' }, 'سلّم التصعيد: المستحق اليوم ', h('strong', null, 'L' + esc.due), ' · المسجل ',
+      esc.executed >= 0 ? U.escalationBadge(esc.executed) : h('span', { class: 'muted' }, 'لا مستوى مسجل'),
+      esc.next ? ' · التالي L' + esc.next.level + ' في ' + B.format.formatDate(esc.next.date) : '');
+    return U.card('التحليل والخطوة التالية', h('div', { class: 'stack' },
+      h('p', { class: 'ranked__next', id: 'next-step' }, h('strong', null, 'الخطوة التالية: '), step.text, ' ',
+        step.kind === 'letter' ? h('a', { href: '#/letters?entity=' + encodeURIComponent(r.entityId) + '&level=L' + step.level, class: 'btn btn--secondary btn--small' }, B.dom.icon('mail'), 'إعداد الخطاب') : null),
+      escLine,
+      h('details', { class: 'details-toggle' },
+        h('summary', null, 'درجة الأولوية: ', h('strong', { id: 'score' }, String(score.score)), ' — لماذا؟'),
+        score.factors.length ? h('ul', { class: 'factors' }, score.factors.map(function (f) { return h('li', null, h('span', null, f.label), h('span', { class: 'factors__pts' }, '+' + f.points)); }))
+          : h('p', { class: 'muted small' }, 'لم تنطبق أي قاعدة.')),
+      h('p', { class: 'muted small' }, 'محسوبة بقواعد مكتوبة من بيانات المتطلب، لا ذكاء اصطناعي. ', h('a', { href: '#/insights' }, 'التحليل التشغيلي الكامل'))), { id: 'analysis-title' });
+  }
 
   function followUpsCard(ctx, r) {
     var list = U.sortedFollowUps(r);
@@ -179,6 +206,7 @@
         U.field({ id: 'fu-date', name: 'date', label: 'التاريخ', required: true, control: h('input', { type: 'date', name: 'date', class: 'input', value: ctx.today, max: ctx.today }) }),
         U.field({ id: 'fu-type', name: 'type', label: 'النوع', required: true, control: U.selectControl('type', U.optionsFromMap(M.FOLLOWUP_TYPES), 'call') }),
         U.field({ id: 'fu-outcome', name: 'outcome', label: 'النتيجة', required: true, control: U.selectControl('outcome', U.optionsFromMap(M.FOLLOWUP_OUTCOMES), '', 'اختيار النتيجة') }),
+        U.field({ id: 'fu-level', name: 'escalationLevel', label: 'مستوى التصعيد', hint: 'اختياري: إذا كانت المتابعة خطابًا من سلّم التصعيد.', control: U.selectControl('escalationLevel', B.model.ESCALATION_NAMES.map(function (n, i) { return { value: String(i), label: 'L' + i + ' — ' + n }; }), '', 'متابعة عادية دون مستوى') }),
         U.field({ id: 'fu-next', name: 'nextActionDate', label: 'موعد الإجراء التالي', hint: 'اختياري: يظهر المتطلب في «مستحقة الآن» عند حلوله.', control: h('input', { type: 'date', name: 'nextActionDate', class: 'input' }) }),
         U.field({ id: 'fu-note', name: 'note', label: 'الملاحظة', required: true, wide: true, control: h('textarea', { name: 'note', class: 'input', rows: '2', maxlength: '1100', dir: 'auto' }) })),
       h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'btn btn--secondary' }, 'إضافة المتابعة')));
@@ -186,7 +214,7 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var f = form.elements;
-      var res = A.addFollowUp(ctx.data, r.id, { date: f.date.value, type: f.type.value, outcome: f.outcome.value, note: f.note.value, nextActionDate: f.nextActionDate.value }, ctx.env());
+      var res = A.addFollowUp(ctx.data, r.id, { date: f.date.value, type: f.type.value, outcome: f.outcome.value, note: f.note.value, nextActionDate: f.nextActionDate.value, escalationLevel: f.escalationLevel.value }, ctx.env());
       if (!U.handle(form, res, ctx)) return;
       ctx.save('أُضيفت المتابعة.');
       ctx.rerender();
@@ -207,7 +235,7 @@
       list.length ? h('ol', { class: 'timeline' }, list.map(function (f) {
         return h('li', null,
           h('p', { class: 'timeline__head' }, h('span', { class: 'strong' }, B.format.formatDate(f.date)),
-            f.type ? B.dom.badge(M.FOLLOWUP_TYPES[f.type] || f.type, 'neutral') : null, U.outcomeBadge(f.outcome)),
+            f.type ? B.dom.badge(M.FOLLOWUP_TYPES[f.type] || f.type, 'neutral') : null, U.outcomeBadge(f.outcome), U.escalationBadge(f.escalationLevel)),
           h('p', null, f.note),
           f.nextActionDate ? h('p', { class: 'muted small' }, 'الإجراء التالي: ' + B.format.formatDate(f.nextActionDate)) : null,
           h('button', { type: 'button', class: 'link-button link-button--danger small', onclick: function () { removeFollowUp(f); } }, 'حذف المتابعة'));

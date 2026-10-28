@@ -61,6 +61,7 @@
       U.pageHeader(e.name, null, [
         h('a', { href: '#/entities/' + encodeURIComponent(e.id) + '/edit', class: 'btn btn--primary' }, 'تعديل'),
         h('a', { href: '#/requirements?entity=' + encodeURIComponent(e.id), class: 'btn btn--secondary' }, 'عرض متطلباتها في القائمة'),
+        s.open ? h('a', { href: '#/letters?entity=' + encodeURIComponent(e.id), class: 'btn btn--secondary', id: 'entity-letter' }, B.dom.icon('mail'), 'إعداد خطاب طلب بيانات') : null,
         deleteControl
       ]),
       h('p', { class: 'meta-line' }, M.ENTITY_TYPES[e.type] || 'جهة', e.contactRole ? ' · جهة التواصل: ' + e.contactRole : ''),

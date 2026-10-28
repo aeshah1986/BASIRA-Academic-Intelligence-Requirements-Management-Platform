@@ -136,7 +136,9 @@ const ROUTES = ['#/dashboard', '#/rankings', '#/rankings?ranking=QS', '#/indicat
   '#/requirements', '#/requirements?due=overdue', '#/requirements/new', '#/requirements/req-f1', '#/requirements/req-f1/edit',
   '#/entities', '#/entities/ent-research', '#/followups', '#/followups?tab=decisions', '#/reports', '#/reports?type=overdue',
   '#/activity', '#/requirements/missing', '#/indicators/new', '#/entities/new', '#/entities/ent-hr/edit', '#/evidence', '#/evidence/new',
-  '#/followups?tab=all', '#/decisions/new', '#/decisions/dec-1/resolve'];
+  '#/followups?tab=all', '#/decisions/new', '#/decisions/dec-1/resolve',
+  // المرحلة 5
+  '#/insights', '#/letters', '#/letters?entity=ent-hr&level=L2', '#/letters/templates', '#/reports?type=priorities', '#/reports?type=response'];
 
 async function sweep(page, label) {
   const problems = [];
@@ -535,6 +537,149 @@ async function runPhase4(cdp) {
   await cdp.send('Target.closeTarget', { targetId: p.targetId });
 }
 
+// ---------- المرحلة 5: محرك التحليل التشغيلي والخطابات والتصدير ----------
+// القيم المتوقعة محسوبة مسبقًا يدويًا (docs/design/09 §6) على بيانات الفحص في 2026-11-01.
+async function runPhase5(cdp, tmp) {
+  const p = await openPage(cdp);
+  await p.viewport(1280, 900, false);
+  // كل طلبات الشبكة تُرصد: المتوقع ألا يخرج أي طلب عن file:// وblob: وdata: (AC-COM-09)
+  const requests = [];
+  cdp.on(m => { if (m.sessionId === p.sessionId && m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url); });
+  await p.send('Network.enable');
+  await p.goto(APP + '#/dashboard');
+  await p.eval("localStorage.removeItem('basira.v1');");
+  await p.goto(APP + '#/dashboard');
+  const setv = (sel, v) => p.eval('const el = document.querySelector(' + JSON.stringify(sel) + '); el.value = ' + JSON.stringify(v) + '; el.dispatchEvent(new Event("change", { bubbles: true })); return true;');
+  const stored = () => p.eval("return JSON.parse(localStorage.getItem('basira.v1') || 'null');");
+  const confirmDialog = label => p.clickSelector('.dialog button', label);
+  const ranking = () => p.eval('return [...document.querySelectorAll(".ranked__item")].map(li => li.dataset.req.replace("req-", "") + ":" + li.querySelector(".ranked__score strong").textContent).join(" ");');
+  const kpis = () => p.eval('return [...document.querySelectorAll(".insights .kpi__value")].map(e => e.textContent).join(" ");');
+  const dlDir = path.join(tmp, 'downloads');
+  fs.mkdirSync(dlDir, { recursive: true });
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir, eventsEnabled: true });
+  async function waitFile(name) {
+    for (let i = 0; i < 40; i++) { if (fs.existsSync(path.join(dlDir, name))) { await sleep(150); return fs.readFileSync(path.join(dlDir, name), 'utf8'); } await sleep(150); }
+    return null;
+  }
+
+  // P5-01 لوحة القيادة: بطاقة التنبيهات من المحرك
+  const dash = await p.eval('const c = document.querySelector(".alerts-card"); return c ? c.querySelector("h2").textContent + " | " + c.querySelectorAll("li").length : "";');
+  check('P5-01', 'لوحة القيادة: «3 عاجل و2 للمتابعة» وأهم 3 تنبيهات', /3 عاجل، و2 للمتابعة/.test(dash) && / \| 3$/.test(dash), dash);
+
+  // P5-02 صفحة التحليل: الأرقام والترتيب المحسوبان مسبقًا، وتمييز القواعد عن الذكاء الاصطناعي
+  await p.clickSelector('.alerts-card a.more-link');
+  const ins = await p.eval('return { hash: location.hash, notice: document.querySelector(".rules-notice").textContent };');
+  const r0 = await ranking();
+  const k0 = await kpis();
+  check('P5-02', 'التحليل التشغيلي: الملخص 3/2/5/17% والترتيب F6:97 F1:92 F2:66 F5:40 F4:10، مع تنبيه «قواعد حسابية، لا ذكاء اصطناعي»',
+    ins.hash === '#/insights' && k0 === '3 2 5 17%' && r0 === 'f6:97 f1:92 f2:66 f5:40 f4:10' && /لا ذكاء اصطناعي/.test(ins.notice) && /لا يُستخدم نموذج لغوي/.test(ins.notice), k0 + ' · ' + r0);
+
+  // P5-03 تفسير الدرجة: نقرة على «لماذا هذه الدرجة؟»
+  await p.clickSelector('.ranked__item summary');
+  const why = await p.eval('const d = document.querySelector(".ranked__item details"); return { open: d.open, pts: [...d.querySelectorAll(".factors__pts")].map(e => e.textContent).join(" ") };');
+  check('P5-03', 'تفسير درجة F6: +57 +20 +10 +10 = 97', why.open && why.pts === '+57 +20 +10 +10 97', why.pts);
+
+  // P5-04 الرسوم مرتبطة بالبيانات (القيم مكتوبة نصًا)
+  const chartText = await p.eval('return [...document.querySelectorAll(".chart")].map(c => c.querySelector(".chart__title").textContent + "=" + [...c.querySelectorAll(".chart__value")].map(v => v.textContent).join("/")).join(" | ");');
+  check('P5-04', 'الرسوم تعرض قيم البيانات: جاهزية العربي 11%، والموعد 2/2/0/1/0/1، والحالة 2/1/2/1',
+    /جاهزية المؤشرات حسب التصنيف=11% \(مُدخل 0 من 9\)\/0%/.test(chartText) && /المتطلبات حسب الموعد=2\/2\/0\/1\/0\/1/.test(chartText) && /المتطلبات حسب الحالة=2\/1\/2\/1/.test(chartText), chartText.slice(0, 160));
+
+  // P5-05 التحديث عند تغيير البيانات: متابعة على F6 من نموذجها الحقيقي
+  await p.route('#/requirements/req-f6');
+  await setv('#followups-title ~ div form [name=outcome]', 'promised');
+  await p.clickSelector('#followups-title ~ div form [name=note]');
+  await p.typeText('وعدت الجهة بإرسال الردود');
+  await p.clickSelector('#followups-title ~ div form button[type=submit]');
+  const nextF6 = await p.eval('return document.getElementById("score").textContent;');
+  await p.route('#/insights');
+  const r1 = await ranking();
+  check('P5-05', 'بعد متابعة على F6: درجتها 87 فورًا في صفحتها، وF1 يصعد إلى الأول في التحليل', nextF6 === '87' && r1 === 'f1:92 f6:87 f2:66 f5:40 f4:10', 'F6=' + nextF6 + ' · ' + r1);
+
+  // P5-06 إكمال F1 من نموذج التعديل: تتغير النسب والتنبيهات والرسوم
+  await p.route('#/requirements/req-f1/edit');
+  await setv('[name=missingData]', '');
+  await setv('[name=evidenceLink]', 'https://example.org/basira/f1');
+  await setv('[name=status]', 'done');
+  await p.clickSelector('form button[type=submit]');
+  await p.route('#/insights');
+  const k2 = await kpis();
+  const r2 = await ranking();
+  const overdueBar = await p.eval('return [...document.querySelectorAll(".chart")].find(c => /حسب الموعد/.test(c.textContent)).querySelector(".chart__value").textContent;');
+  check('P5-06', 'بعد إكمال F1: الإنجاز 33%، وتنبيهان عاجلان، وعمود «متأخر» = 1، وF1 خارج الترتيب', k2 === '2 2 4 33%' && r2 === 'f6:87 f2:66 f5:40 f4:10' && overdueBar === '1', k2 + ' · ' + r2 + ' · متأخر=' + overdueBar);
+
+  // P5-07 خطاب جهة البحث العلمي (AC-COM-01): المستوى المقترح والبنود وقيمة العام الماضي، وتعديل المسودة
+  await p.route('#/entities/ent-research');
+  await p.clickSelector('#entity-letter');
+  const letter = await p.eval('return { hash: location.hash, sel: document.querySelector("[name=level]").value, body: document.querySelector(".letter__editor").value, items: document.querySelectorAll(".letters-page .compact-list li").length };');
+  await p.eval('const t = document.querySelector(".letter__editor"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return true;');
+  await p.typeText('\nملاحظة مضافة للتجربة');
+  const preview = await p.eval('return document.querySelector(".letter__body").textContent.endsWith("ملاحظة مضافة للتجربة");');
+  check('P5-07', 'خطاب البحث العلمي من صفحة الجهة: L0، وبندان (F5 ثم F4) مع قيمة العام الماضي 90، والتعديل يظهر في نسخة الطباعة',
+    letter.sel === 'L0' && letter.items === 2 && /قيمة العام الماضي للتأكيد أو التحديث: 90/.test(letter.body) && letter.body.indexOf('أعداد البحوث') < letter.body.indexOf('إحصاءات الاستشهادات') && preview, letter.hash);
+
+  // P5-08 النسخ إلى الحافظة
+  await cdp.send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {});
+  await p.clickSelector('.letters-page button', 'نسخ النص');
+  await sleep(300);
+  const copied = await p.eval('const t = [...document.querySelectorAll(".toast")].map(x => x.textContent).pop() || ""; let clip = ""; try { clip = await navigator.clipboard.readText(); } catch (e) { clip = "ERR " + e.message; } return { t, clip };');
+  check('P5-08', '«نسخ النص» يضع الموضوع والنص المعدّل في الحافظة', /نُسخ نص الخطاب/.test(copied.t) && copied.clip.startsWith('الموضوع: طلب استكمال بيانات') && copied.clip.endsWith('ملاحظة مضافة للتجربة'), copied.t + ' · ' + copied.clip.slice(0, 40));
+
+  // P5-09 الطباعة: الخطاب وحده (AC-COM-02)
+  await p.send('Emulation.setEmulatedMedia', { media: 'print' });
+  const printView = await p.eval('const vis = s => { const e = document.querySelector(s); return !!e && getComputedStyle(e).display !== "none" && e.getClientRects().length > 0; }; return { letter: vis(".letter"), editor: vis(".letter__editor"), nav: vis(".sidebar"), head: vis(".letters-page .page-head"), items: vis(".letters-page .grid > .stack") };');
+  await p.send('Emulation.setEmulatedMedia', { media: '' });
+  check('P5-09', 'معاينة الطباعة: يظهر الخطاب فقط، دون المحرر والتنقل والعنوان والبنود الجانبية', printView.letter && !printView.editor && !printView.nav && !printView.head && !printView.items, JSON.stringify(printView));
+
+  // P5-10 «تسجيل الإرسال» (AC-COM-03)
+  await p.clickSelector('#record-sent');
+  const recBody = await p.eval('return document.querySelector(".dialog__body").textContent;');
+  await confirmDialog('تسجيل الإرسال');
+  const s1 = await stored();
+  const f5 = s1.requirements.find(r => r.id === 'req-f5').followUps.slice(-1)[0];
+  await p.route('#/requirements/req-f5');
+  const f5next = await p.eval('return document.getElementById("next-step").textContent;');
+  check('P5-10', '«تسجيل الإرسال»: متابعة L0 بموعد تالٍ 2026-11-05 لـ F5، ونشاط letter_sent، والخطوة التالية «انتظار… L1»',
+    /بندان/.test(recBody) && f5 && f5.escalationLevel === 0 && f5.nextActionDate === '2026-11-05' && s1.activities[0].action === 'letter_sent' && /انتظار رد الجهة.*L1/.test(f5next), f5next.trim());
+
+  // P5-11 قوالب الخطابات: رفض المتغير غير المعروف، ثم الحفظ والاستخدام والاستعادة
+  await p.route('#/letters/templates');
+  const tplBefore = JSON.stringify((await stored()).settings || null);
+  await setv('[data-template=L1] [name=body]', 'تذكير إلى {الجهة} بالبنود {البنودد} قبل الموعد');
+  await p.clickSelector('[data-template=L1] button[type=submit]');
+  const tplErr = await p.eval('return (document.getElementById("t-L1-body-error") || {}).textContent || "";');
+  const tplSame = JSON.stringify((await stored()).settings || null) === tplBefore;
+  await setv('[data-template=L1] [name=body]', 'تذكير مخصص إلى {الجهة}:\n{البنود}');
+  await p.clickSelector('[data-template=L1] button[type=submit]');
+  const badge = await p.eval('return document.querySelector("#tpl-L1").parentElement.querySelector(".meta-line").textContent;');
+  await p.route('#/letters?entity=ent-research&level=L1');
+  const custom = await p.eval('return document.querySelector(".letter__editor").value;');
+  await p.route('#/letters/templates');
+  await p.clickSelector('[data-template=L1] button', 'استعادة النص الافتراضي');
+  await confirmDialog('استعادة');
+  const restored = await stored();
+  check('P5-11', 'القوالب: {البنودد} يُرفض دون حفظ، والقالب المعدل يُستخدم في الخطاب، ثم يُستعاد الافتراضي',
+    /متغيرات غير معروفة: \{البنودد\}/.test(tplErr) && tplSame && /معدّل/.test(badge) && custom.startsWith('تذكير مخصص إلى وحدة البحث العلمي:') && !restored.settings.letterTemplates.L1,
+    tplErr);
+
+  // P5-12 تصدير CSV حقيقي من التقارير ومن التحليل
+  await p.route('#/reports?type=priorities');
+  await p.clickSelector('#export-csv');
+  const csv1 = await waitFile('basira-priorities-' + TODAY + '.csv');
+  await p.route('#/reports?type=response');
+  await p.clickSelector('#export-csv');
+  const csv2 = await waitFile('basira-response-' + TODAY + '.csv');
+  const lines1 = csv1 ? csv1.split('\r\n').filter(Boolean) : [];
+  check('P5-12', 'تصدير CSV: ملف الأولويات (BOM + رأس + 4 صفوف، أولها F6 بدرجة 87) وملف استجابة الجهات',
+    csv1 && csv1.charCodeAt(0) === 0xFEFF && lines1.length === 5 && lines1[1].startsWith('"1","87","بيانات الخبراء') && csv2 && /"وحدة الشراكات الدولية","1","1","100%"/.test(csv2),
+    (lines1[1] || 'لا ملف').slice(0, 50));
+
+  // P5-13 لا طلبات شبكة خارج الملفات المحلية، ولا أخطاء
+  const external = requests.filter(u => !/^(file|blob|data|about|chrome-extension|devtools):/.test(u));
+  check('P5-13', 'لا أي طلب شبكة خارجي أثناء التحليل والخطابات والنسخ والطباعة والتصدير (AC-COM-09)', requests.length > 0 && !external.length, external.join(', ') || requests.length + ' طلبًا محليًا فقط');
+  check('P5-14', 'لا أخطاء في وحدة التحكم طوال سيناريوهات المرحلة 5', !p.errors.length, p.errors.join(' | ') || 'صفر');
+  await cdp.send('Target.closeTarget', { targetId: p.targetId });
+}
+
 // ---------- التشغيل ----------
 async function main() {
   const browser = CANDIDATES.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } });
@@ -557,6 +702,7 @@ async function main() {
     await cdp.opened;
     const pdfPath = await run(cdp, tmp);
     await runPhase4(cdp);
+    await runPhase5(cdp, tmp);
     if (ARTIFACTS) console.log('\nPDF الطباعة: ' + pdfPath);
   } catch (err) {
     check('E-ERR', 'خطأ في تشغيل الفحص', false, err.message);

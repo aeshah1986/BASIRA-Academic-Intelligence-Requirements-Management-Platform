@@ -207,12 +207,54 @@
   }
 
   // متابعات مرتبة من الأحدث إلى الأقدم (AC-FUP-02).
+  /*
+   * رسم أعمدة أفقية مرتبط بالبيانات (CSS فقط، دون مكتبات). القيمة مكتوبة نصًا بجانب كل عمود،
+   * فلا تعتمد القراءة على اللون ولا على الطول. rows: [{ label, value, text, tone, href, title }]
+   * value رقم (أو null = «لا بيانات»)، وmax الحد الأعلى (100 للنسب، أو أكبر قيمة للأعداد).
+   */
+  function barChart(title, rows, opts) {
+    opts = opts || {};
+    var values = rows.map(function (r) { return r.value || 0; });
+    var max = opts.max || Math.max.apply(null, values.concat([1]));
+    var id = 'chart-' + String(title).replace(/\s+/g, '-');
+    return h('figure', { class: 'chart', 'aria-labelledby': id },
+      h('figcaption', { id: id, class: 'chart__title' }, title),
+      h('ul', { class: 'chart__rows' }, rows.map(function (r) {
+        var pct = r.value === null || r.value === undefined ? 0 : Math.max(0, Math.min(100, Math.round(100 * r.value / max)));
+        var label = h('span', { class: 'chart__label' }, r.label);
+        var bar = h('span', { class: 'chart__track', 'aria-hidden': 'true' },
+          h('span', { class: 'chart__bar' + (r.tone ? ' chart__bar--' + r.tone : ''), style: 'inline-size:' + pct + '%' }));
+        var value = h('span', { class: 'chart__value' }, r.text !== undefined ? r.text : (r.value === null ? 'لا بيانات' : String(r.value)));
+        var inner = [label, bar, value];
+        return h('li', { title: r.title || (r.label + ': ' + (r.text !== undefined ? r.text : r.value)) },
+          r.href ? h('a', { href: r.href, class: 'chart__row' }, inner) : h('span', { class: 'chart__row' }, inner));
+      })),
+      opts.note ? h('p', { class: 'muted small chart__note' }, opts.note) : null);
+  }
+
+  // تمييز صريح: هذه نتائج قواعد حسابية وأتمتة، لا ذكاء اصطناعي قائم على نماذج لغوية.
+  function rulesNotice(extra) {
+    return h('div', { class: 'banner banner--info rules-notice', role: 'note' },
+      B.dom.icon('shield'),
+      h('span', null, h('strong', null, 'قواعد حسابية، لا ذكاء اصطناعي: '),
+        'النتائج هنا تحسبها قواعد مكتوبة وثابتة من بياناتك المحفوظة (أتمتة). لا يُستخدم نموذج لغوي ولا تعلم آلي ولا اتصال بالإنترنت، والبيانات نفسها تعطي النتيجة نفسها دائمًا، وكل نتيجة تُعرض مع سببها.',
+        extra ? [' ', extra] : null));
+  }
+
+  function escalationBadge(level) {
+    if (typeof level !== 'number') return null;
+    return B.dom.badge('L' + level + ' ' + M.ESCALATION_NAMES[level], level >= 3 ? 'danger' : level === 2 ? 'warning' : 'neutral');
+  }
+
   function sortedFollowUps(req) {
     return (req.followUps || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
   }
 
   B.ui = {
     RANKING_NAMES: RANKING_NAMES,
+    barChart: barChart,
+    rulesNotice: rulesNotice,
+    escalationBadge: escalationBadge,
     rankingName: rankingName,
     person: person,
     statusBadge: statusBadge,

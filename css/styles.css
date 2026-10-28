@@ -529,3 +529,72 @@ textarea.input { resize: vertical; line-height: 1.6; }
 
 /* رموز المؤشرات والقيم القصيرة في الجداول لا تنقسم عند الشرطة (AR-EDU-3) */
 .rtable td .ltr { white-space: nowrap; }
+
+/* ---------- المرحلة 5: التحليل التشغيلي والخطابات ---------- */
+.rules-notice { align-items: flex-start; margin-block-end: 16px; }
+.print-only { display: none; }
+
+/* التنبيهات */
+.alerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.alert { border: 1px solid var(--border); border-inline-start: 4px solid var(--warning-bar); border-radius: var(--radius); background: var(--white); }
+.alert--danger { border-inline-start-color: var(--danger); }
+.alert__link { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; color: inherit; text-decoration: none; min-block-size: 44px; }
+.alert__link:hover .alert__title { text-decoration: underline; }
+.alert__link > .icon { color: var(--warning); flex: none; margin-block-start: 2px; }
+.alert--danger .alert__link > .icon { color: var(--danger); }
+.alert__main { display: grid; gap: 2px; min-inline-size: 0; }
+.alert__title { font-weight: 600; overflow-wrap: anywhere; }
+.alerts-card { margin-block-end: 16px; }
+.alerts-card__head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-block-end: 8px; }
+.alerts-card__head .card__title { display: flex; align-items: center; gap: 6px; }
+
+/* الرسوم: أعمدة أفقية والقيمة مكتوبة نصًا */
+.charts { gap: 24px; }
+.chart { margin: 0; }
+.chart__title { font-weight: 700; margin-block-end: 8px; color: var(--navy-800); }
+.chart__rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.chart__row { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; align-items: center; gap: 8px; color: inherit; text-decoration: none; min-block-size: 32px; }
+a.chart__row:hover .chart__label { text-decoration: underline; }
+.chart__label { font-size: 14px; overflow-wrap: anywhere; }
+.chart__track { block-size: 12px; background: var(--navy-100); border-radius: 4px; overflow: hidden; }
+.chart__bar { display: block; block-size: 100%; background: var(--turq-700); border-start-end-radius: 4px; border-end-end-radius: 4px; }
+.chart__bar--danger { background: var(--danger); }
+.chart__bar--success { background: var(--success); }
+.chart__value { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.chart__note { margin-block-start: 6px; }
+
+/* ترتيب الأولويات */
+.ranked { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ranked__item { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: grid; gap: 6px; }
+.ranked__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ranked__rank { inline-size: 28px; block-size: 28px; border-radius: 50%; background: var(--navy-800); color: var(--white); display: inline-grid; place-items: center; font-weight: 700; flex: none; }
+.ranked__title { font-weight: 700; flex: 1 1 200px; overflow-wrap: anywhere; }
+.ranked__score { background: var(--turq-100); color: var(--navy-900); border-radius: 999px; padding: 2px 10px; font-size: 14px; white-space: nowrap; }
+.ranked__next { margin: 0; }
+.ranked__next .btn { margin-inline-start: 6px; }
+.factors { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+.factors li { display: flex; justify-content: space-between; gap: 12px; border-block-end: 1px dashed var(--border); padding-block: 2px; }
+.factors__pts { font-weight: 700; white-space: nowrap; direction: ltr; }
+.factors__total { font-weight: 700; border-block-end: 0 !important; }
+.method dl { margin-block: 8px; }
+
+/* الخطاب */
+.letter__editor { font-family: var(--font); line-height: 1.8; }
+.letter__subject { font-weight: 700; margin-block-end: 12px; }
+.letter__body { white-space: pre-wrap; line-height: 1.9; }
+
+@media (max-width: 639px) {
+  .chart__row { grid-template-columns: 1fr auto; }
+  .chart__track { grid-column: 1 / -1; grid-row: 2; }
+}
+
+@media print {
+  .print-only { display: block !important; }
+  .rules-notice { border: 1px solid #999; }
+  .letter { font-size: 14pt; }
+  .letters-page .page-head, .letters-page .card__title, .letters-page .back-link { display: none !important; }
+  .letters-page .card { border: 0; padding: 0; }
+  .letters-page .grid { display: block; }
+  details.details-toggle > *:not(summary) { display: block; }
+  .ranked__item, .alert, .chart li { break-inside: avoid; }
+}

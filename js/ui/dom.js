@@ -53,7 +53,11 @@
     check: ['M5 12l5 5 9-10'],
     chevron: ['M15 6l-6 6 6 6'],
     empty: ['M3 7h18v13H3z', 'M3 7l3-4h12l3 4', 'M9 12h6'],
-    shield: ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', 'M9 12l2 2 4-4']
+    shield: ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', 'M9 12l2 2 4-4'],
+    pulse: ['M3 12h4l3-8 4 16 3-8h4'],
+    mail: ['M3 6h18v12H3z', 'M3 7l9 6 9-6'],
+    download: ['M12 4v11', 'M7 10l5 5 5-5', 'M5 20h14'],
+    copy: ['M9 9h11v11H9z', 'M5 15H4V4h11v1']
   };
 
   function icon(name, extraClass) {

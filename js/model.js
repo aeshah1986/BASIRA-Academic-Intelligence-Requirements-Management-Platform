@@ -118,6 +118,8 @@
 
   var ENTITY_TYPES = { deanship: 'عمادة', vice_presidency: 'وكالة', department: 'إدارة', unit: 'وحدة', college: 'كلية', center: 'مركز', other: 'أخرى' };
   var FOLLOWUP_TYPES = { call: 'اتصال', letter: 'خطاب', meeting: 'اجتماع', email: 'بريد', other: 'أخرى' };
+  // مستويات سلّم التصعيد (docs/design/07 §3). المتابعة العادية بلا مستوى.
+  var ESCALATION_NAMES = ['طلب رسمي', 'تذكير ودي', 'تذكير رسمي', 'تصعيد للمشرف', 'تصعيد للرئاسة أو اللجنة'];
   var FOLLOWUP_OUTCOMES = {
     no_reply: 'لا رد بعد',
     promised: 'وعد بالتسليم',
@@ -146,6 +148,7 @@
   return {
     ENTITY_TYPES: ENTITY_TYPES,
     FOLLOWUP_TYPES: FOLLOWUP_TYPES,
+    ESCALATION_NAMES: ESCALATION_NAMES,
     FOLLOWUP_OUTCOMES: FOLLOWUP_OUTCOMES,
     EVIDENCE_TYPES: EVIDENCE_TYPES,
     EVIDENCE_STATUSES: EVIDENCE_STATUSES,

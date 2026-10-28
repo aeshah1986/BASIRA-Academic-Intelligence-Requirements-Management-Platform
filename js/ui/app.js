@@ -122,6 +122,33 @@
     return n + ' متطلبًا';
   }
 
+  // ---------- التنزيل والنسخ (محليًا، دون أي اتصال) ----------
+  function download(filename, text, mime) {
+    var blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    var link = h('a', { href: URL.createObjectURL(blob), download: filename });
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(function () { URL.revokeObjectURL(link.href); link.remove(); }, 0);
+  }
+
+  // يعيد Promise<boolean>: الحافظة الحديثة أولًا، ثم الطريقة القديمة إن رُفضت (بعض المتصفحات تقيدها عبر file://).
+  function copyText(text) {
+    var fallback = function () {
+      var ta = h('textarea', { class: 'visually-hidden', readonly: true });
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      return ok;
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallback(); });
+    }
+    return Promise.resolve(fallback());
+  }
+
   // ---------- حوار «البيانات» ----------
   function exportBackup() {
     B.actions.logEvent(state.data, env(), 'export', 'صُدّرت نسخة احتياطية.');
@@ -213,6 +240,9 @@
   // ---------- التنقل ----------
   var ROUTES = [
     { re: /^\/dashboard$/, view: 'dashboard', nav: 'dashboard' },
+    { re: /^\/insights$/, view: 'insights', nav: 'insights' },
+    { re: /^\/letters\/templates$/, view: 'letterTemplates', nav: 'letters' },
+    { re: /^\/letters$/, view: 'letters', nav: 'letters' },
     { re: /^\/rankings$/, view: 'rankings', nav: 'rankings' },
     { re: /^\/indicators\/new$/, view: 'indicatorNew', nav: 'rankings' },
     { re: /^\/indicators\/([^/]+)\/edit$/, view: 'indicatorEdit', nav: 'rankings' },
@@ -238,11 +268,13 @@
 
   var NAV = [
     { key: 'dashboard', href: '#/dashboard', label: 'لوحة القيادة', short: 'القيادة', icon: 'home', mobile: true },
+    { key: 'insights', href: '#/insights', label: 'التحليل التشغيلي', short: 'التحليل', icon: 'pulse' },
     { key: 'rankings', href: '#/rankings', label: 'التصنيفات والمؤشرات', short: 'المؤشرات', icon: 'chart', mobile: true },
     { key: 'requirements', href: '#/requirements', label: 'المتطلبات', short: 'المتطلبات', icon: 'list', mobile: true },
     { key: 'entities', href: '#/entities', label: 'الجهات والمسؤوليات', short: 'الجهات', icon: 'building' },
     { key: 'evidence', href: '#/evidence', label: 'الأدلة', short: 'الأدلة', icon: 'shield' },
     { key: 'followups', href: '#/followups', label: 'المتابعات', short: 'المتابعات', icon: 'chat', mobile: true },
+    { key: 'letters', href: '#/letters', label: 'الخطابات', short: 'الخطابات', icon: 'mail' },
     { key: 'reports', href: '#/reports', label: 'التقارير', short: 'التقارير', icon: 'file' },
     { key: 'activity', href: '#/activity', label: 'سجل الأنشطة', short: 'السجل', icon: 'clock' }
   ];
@@ -340,6 +372,8 @@
       setQuery: setQuery,
       newId: newId,
       env: env,
+      download: download,
+      copyText: copyText,
       rerender: function () { render(true); }
     };
 

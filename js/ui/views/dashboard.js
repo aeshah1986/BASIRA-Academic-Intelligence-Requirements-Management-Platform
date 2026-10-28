@@ -85,6 +85,21 @@
     }), h('li', { class: 'muted small' }, 'طول الشريط = المفتوح، والجزء الأحمر = المتأخر'));
   }
 
+  // أهم التنبيهات العاجلة من محرك التحليل (قواعد حسابية)، مع رابط إلى التحليل الكامل.
+  function alertsCard(ctx) {
+    var list = B.insights.alerts(ctx.data, ctx.today);
+    if (!list.length) return null;
+    var danger = list.filter(function (a) { return a.level === 'danger'; }).length;
+    return h('section', { class: 'card alerts-card', 'aria-labelledby': 'dash-alerts-title' },
+      h('div', { class: 'alerts-card__head' },
+        h('h2', { id: 'dash-alerts-title', class: 'card__title' }, B.dom.icon('alert'), 'تنبيهات عاجلة: ' + danger + ' عاجل، و' + (list.length - danger) + ' للمتابعة'),
+        h('a', { href: '#/insights', class: 'more-link' }, 'التحليل التشغيلي', B.dom.icon('chevron'))),
+      h('ul', { class: 'alerts alerts--compact' }, list.slice(0, 3).map(function (a) {
+        return h('li', { class: 'alert alert--' + a.level }, h('a', { href: a.href, class: 'alert__link' },
+          h('span', { class: 'alert__main' }, h('span', { class: 'alert__title' }, B.dom.badge(a.level === 'danger' ? 'عاجل' : 'تنبيه', a.level), ' ', a.title), h('span', { class: 'muted small' }, a.detail))));
+      })));
+  }
+
   B.views.dashboard = function (ctx) {
     var d = ctx.data;
     var open = d.requirements.filter(D.isOpen);
@@ -103,6 +118,7 @@
     return h('div', { class: 'dashboard' },
       U.pageHeader('لوحة القيادة', 'ما الذي يحتاج انتباهك اليوم؟',
         h('a', { href: '#/requirements/new', class: 'btn btn--primary' }, B.dom.icon('plus'), 'إضافة متطلب')),
+      alertsCard(ctx),
       h('div', { class: 'grid grid--2' }, rankings.map(function (code) { return rankingCard(ctx, code); })),
       h('nav', { class: 'kpis', 'aria-label': 'مؤشرات رقمية' },
         kpi(open.length, 'متطلبات مفتوحة', '#/requirements?status=open', null),

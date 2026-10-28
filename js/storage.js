@@ -158,6 +158,8 @@
       r.followUps.forEach(function (f, k) {
         if (!isObject(f) || !isNonEmptyString(f.id) || !isISODate(f.date) || typeof f.note !== 'string') {
           errors.push('متابعة رقم ' + (k + 1) + ' في المتطلب «' + r.id + '» غير صالحة.');
+        } else if (f.escalationLevel !== undefined && f.escalationLevel !== null && [0, 1, 2, 3, 4].indexOf(f.escalationLevel) === -1) {
+          errors.push('مستوى التصعيد في متابعة رقم ' + (k + 1) + ' من المتطلب «' + r.id + '» غير صالح.');
         }
       });
     });
@@ -168,6 +170,18 @@
       if (ev.indicatorId && !indicatorIds[ev.indicatorId]) errors.push('الدليل «' + ev.id + '» يشير إلى مؤشر غير موجود.');
       if (ev.requirementId && !requirementIds[ev.requirementId]) errors.push('الدليل «' + ev.id + '» يشير إلى متطلب غير موجود.');
     });
+
+    // الإعدادات اختيارية: قوالب الخطابات المعدلة فقط (L0..L4)، كل قالب { subject, body } نصّان.
+    if (data.settings !== undefined) {
+      if (!isObject(data.settings)) errors.push('الإعدادات «settings» ليست كائنًا.');
+      else if (data.settings.letterTemplates !== undefined) {
+        var lt = data.settings.letterTemplates;
+        if (!isObject(lt)) errors.push('قوالب الخطابات ليست كائنًا.');
+        else Object.keys(lt).forEach(function (code) {
+          if (!/^L[0-4]$/.test(code) || !isObject(lt[code]) || !isNonEmptyString(lt[code].subject) || !isNonEmptyString(lt[code].body)) errors.push('قالب الخطاب «' + code + '» غير صالح.');
+        });
+      }
+    }
 
     return { ok: errors.length === 0, errors: errors };
   }

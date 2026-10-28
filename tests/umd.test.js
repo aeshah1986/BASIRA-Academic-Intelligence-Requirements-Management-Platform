@@ -15,7 +15,10 @@ const FILES = [
   ['js/storage.js', 'storage', 'createStore'],
   ['js/format.js', 'format', 'formatDate'],
   ['js/derive.js', 'derive', 'dueInfo'],
-  ['js/query.js', 'query', 'filterRequirements']
+  ['js/query.js', 'query', 'filterRequirements'],
+  ['js/actions.js', 'actions', 'recordLetterSent'],
+  ['js/csv.js', 'csv', 'toCSV'],
+  ['js/insights.js', 'insights', 'rankRequirements']
 ];
 
 test('كل ملف يعمل كسكربت عادي ويضيف واجهته إلى Basira دون تعارض', () => {
