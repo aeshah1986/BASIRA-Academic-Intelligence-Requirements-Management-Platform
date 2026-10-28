@@ -39,6 +39,7 @@ function withTimeout(promise, ms, label) {
     .finally(() => clearTimeout(timer));
 }
 const results = [];
+let BROWSER_NAME = '';
 function check(id, name, ok, detail) {
   results.push({ id, name, ok: !!ok, detail: detail === undefined ? '' : String(detail) });
   console.log((ok ? 'PASS ' : 'FAIL ') + id.padEnd(9) + ' ' + name + (detail !== undefined ? '  ← ' + detail : ''));
@@ -153,6 +154,9 @@ async function sweep(page, label) {
 
 async function run(cdp, tmp) {
   const page = await openPage(cdp);
+  const netLog = [];
+  cdp.on(m => { if (m.sessionId === page.sessionId && m.method === 'Network.requestWillBeSent') netLog.push(m.params.request.url); });
+  await page.send('Network.enable');
 
   // E-01 الإقلاع من file://
   await page.viewport(1280, 900, false);
@@ -293,6 +297,8 @@ async function run(cdp, tmp) {
   check('E-18', 'نسق الطباعة يخفي التنقل والأزرار ويُبقي التقرير (AC-RPT-04)', !printCss.sidebar && !printCss.topbar && !printCss.printBtn && printCss.report, JSON.stringify(printCss) + ' · PDF: ' + Math.round(fs.statSync(pdfPath).size / 1024) + 'KB');
 
   check('E-19', 'لا أخطاء في وحدة التحكم طوال السيناريوهات', !page.errors.length, page.errors.join(' | ') || 'صفر');
+  const outsideE = netLog.filter(u => !/^(file|blob|data|about|devtools):/.test(u));
+  check('E-25', 'لا أي طلب شبكة خارجي في سيناريوهات الإقلاع والبحث والإضافة والتصدير والاستيراد والطباعة (AC-SEC-02)', netLog.length > 0 && !outsideE.length, outsideE.join(', ') || netLog.length + ' طلبًا محليًا فقط');
   await cdp.send('Target.closeTarget', { targetId: page.targetId });
 
   // E-20 تعذر التخزين في متصفح حقيقي (localStorage يرمي خطأ)
@@ -680,6 +686,330 @@ async function runPhase5(cdp, tmp) {
   await cdp.send('Target.closeTarget', { targetId: p.targetId });
 }
 
+// ---------- التحقق الشامل قبل التسليم ----------
+// مرجع مستقل للأرقام: يُحسب هنا في Node من البيانات نفسها بمنطق مكتوب من جديد، لا بدوال التطبيق.
+function oracle(data, today) {
+  const add7 = (() => { const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 7); return d.toISOString().slice(0, 10); })();
+  const activeIds = new Set(data.indicators.filter(i => i.active !== false).map(i => i.id));
+  const open = data.requirements.filter(r => r.status !== 'done');
+  const overdue = open.filter(r => r.deadline < today);
+  const soon = open.filter(r => r.deadline >= today && r.deadline <= add7);
+  const conflicts = data.indicators.filter(i => String(i.currentValue || '').trim() && String(i.progressFileValue || '').trim() && String(i.currentValue).trim() !== String(i.progressFileValue).trim());
+  const pct = (a, b) => (b ? Math.round(100 * a / b) : null);
+  const W = { not_started: 0, draft: 1 / 3, evidenced: 2 / 3, entered: 1 };
+  const rankings = {};
+  for (const rk of data.rankings) {
+    const inds = data.indicators.filter(i => i.ranking === rk.id && i.active !== false);
+    const reqs = data.requirements.filter(r => inds.some(i => i.id === r.indicatorId));
+    rankings[rk.id] = {
+      progress: pct(reqs.filter(r => r.status === 'done').length, reqs.length),
+      readiness: inds.length ? Math.round(100 * inds.reduce((s, i) => s + W[i.workStatus], 0) / inds.length) : null
+    };
+  }
+  const entities = {};
+  for (const e of data.entities) {
+    const o = open.filter(r => r.entityId === e.id);
+    if (o.length) entities[e.name] = o.length + ' مفتوح · ' + o.filter(r => r.deadline < today).length + ' متأخر';
+  }
+  return {
+    kpis: [open.length, overdue.length, soon.length, conflicts.length, data.decisions.filter(q => q.status === 'open').length].join(','),
+    rankings, entities, activeIds: activeIds.size,
+    overall: pct(data.requirements.filter(r => r.status === 'done').length, data.requirements.length),
+    byStatus: ['new', 'in_progress', 'waiting', 'done'].map(s => data.requirements.filter(r => r.status === s).length).join('/')
+  };
+}
+
+async function runQA(cdp) {
+  const p = await openPage(cdp);
+  await p.viewport(1280, 900, false);
+  const qaRequests = [];
+  cdp.on(m => { if (m.sessionId === p.sessionId && m.method === 'Network.requestWillBeSent') qaRequests.push(m.params.request.url); });
+  await p.send('Network.enable');
+  await p.goto(APP + '#/dashboard');
+  await p.eval("localStorage.removeItem('basira.v1');");
+  await p.goto(APP + '#/dashboard');
+  const setv = (sel, v) => p.eval('const el = document.querySelector(' + JSON.stringify(sel) + '); el.value = ' + JSON.stringify(v) + '; el.dispatchEvent(new Event("change", { bubbles: true })); return true;');
+  const stored = () => p.eval("return JSON.parse(localStorage.getItem('basira.v1') || 'null');");
+  const rowIds = () => p.eval('return [...document.querySelectorAll("#main .row-link")].map(a => decodeURIComponent(a.getAttribute("href").split("/").pop())).sort().join(",");');
+  // ضغطة كاملة (keyDown بنص) كما تفعل لوحة المفاتيح الحقيقية: Enter بلا نص لا يرسل النموذج ضمنيًا.
+  const press = async (key, vk, shift) => {
+    const k = { key, code: key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: shift ? 8 : 0, text: key === 'Enter' ? String.fromCharCode(13) : undefined };
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, k));
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, k));
+    await sleep(120);
+  };
+  const textOf = sel => p.eval('const e = document.querySelector(' + JSON.stringify(sel) + '); return e ? e.textContent.replace(/\\s+/g, " ").trim() : "";');
+
+  // Q-01 كل رابط داخلي في كل صفحة يفتح صفحة صحيحة
+  const hrefs = new Set();
+  for (const r of ROUTES) {
+    await p.route(r);
+    (await p.eval('return [...document.querySelectorAll("a[href^=\'#/\']")].map(a => a.getAttribute("href"));')).forEach(h => hrefs.add(h));
+  }
+  const badLinks = [];
+  for (const href of hrefs) {
+    await p.route('#/dashboard');
+    await p.route(href);
+    const st = await p.eval(`const m = document.getElementById('main'); return { hash: location.hash, h1: !!m.querySelector('h1'), crash: /تعذر عرض هذه الصفحة/.test(m.textContent),
+      notFound: [...document.querySelectorAll('.toast')].some(t => /الصفحة غير موجودة/.test(t.textContent)) };`);
+    if (!st.h1 || st.crash || st.notFound) badLinks.push(href + JSON.stringify(st));
+  }
+  const ext = await p.eval('return [...document.querySelectorAll("a[href^=\'http\']")].filter(a => a.target !== "_blank" || !/noopener/.test(a.rel)).length;');
+  check('Q-01', 'كل رابط داخلي في كل الصفحات يفتح صفحة بعنوان دون انهيار ودون «الصفحة غير موجودة»', !badLinks.length && hrefs.size > 40 && ext === 0, hrefs.size + ' رابطًا فريدًا' + (badLinks.length ? ' · معطوبة: ' + badLinks.join(' ') : ''));
+
+  // Q-02 كل زر مربوط بوظيفة (مستمع نقر، أو إرسال نموذج له مستمع، أو تسمية لحقل، أو ملخص قابل للطي)، وله اسم مقروء
+  const dead = [];
+  let buttons = 0;
+  for (const r of ROUTES) {
+    await p.route(r);
+    const n = await p.eval(`const els = [...document.querySelectorAll('button, summary, label.btn, [role=button]')].filter(e => e.offsetParent || e.getClientRects().length);
+      window.__qa = els; return els.length;`);
+    for (let i = 0; i < n; i++) {
+      const info = await p.eval(`const e = window.__qa[${i}]; return { tag: e.tagName, type: e.type || '', disabled: !!e.disabled, name: (e.textContent || e.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 40),
+        forOk: e.tagName === 'LABEL' ? !!document.getElementById(e.htmlFor) : null, reason: e.getAttribute('aria-describedby') ? !!document.getElementById(e.getAttribute('aria-describedby')) : false, inForm: !!e.form };`);
+      buttons++;
+      if (!info.name) { dead.push(r + ' زر بلا اسم'); continue; }
+      if (info.tag === 'SUMMARY') continue;
+      if (info.tag === 'LABEL') { if (!info.forOk) dead.push(r + ' «' + info.name + '» تسمية بلا حقل'); continue; }
+      if (info.disabled) { if (!info.reason) dead.push(r + ' «' + info.name + '» معطل دون سبب'); continue; }
+      const own = await p.send('Runtime.evaluate', { expression: `window.__qa[${i}]` });
+      const ls = await p.send('DOMDebugger.getEventListeners', { objectId: own.result.objectId });
+      let wired = ls.listeners.some(l => l.type === 'click');
+      if (!wired && info.type === 'submit' && info.inForm) {
+        const form = await p.send('Runtime.evaluate', { expression: `window.__qa[${i}].form` });
+        const fl = await p.send('DOMDebugger.getEventListeners', { objectId: form.result.objectId });
+        wired = fl.listeners.some(l => l.type === 'submit');
+      }
+      if (!wired) dead.push(r + ' «' + info.name + '»');
+    }
+  }
+  check('Q-02', 'كل زر ظاهر في كل الصفحات مربوط بوظيفة وله اسم (AC-UI-07)', !dead.length && buttons > 100, buttons + ' زرًا مفحوصًا' + (dead.length ? ' · بلا وظيفة: ' + dead.join(' | ') : ''));
+
+  // Q-03 دقة الأرقام مقابل مرجع مستقل (البيانات الأولية)
+  const fixture = require(path.join(ROOT, 'data', 'sample-data.js')).createSampleData();
+  async function compareWithOracle(data, label) {
+    const o = oracle(data, TODAY);
+    await p.route('#/dashboard');
+    const ui = await p.eval(`return { kpis: [...document.querySelectorAll('nav.kpis .kpi__value')].map(e => e.textContent).join(','),
+      cards: [...document.querySelectorAll('.rank-card')].map(c => [...c.querySelectorAll('.progress__value')].map(v => v.textContent).join('/')),
+      ents: Object.fromEntries([...document.querySelectorAll('.entity-bars__row')].map(r => [r.querySelector('.entity-bars__name').textContent, r.querySelector('.entity-bars__text').textContent])) };`);
+    await p.route('#/insights');
+    const ins = await p.eval(`return { overall: document.querySelector('#kpi-overall .kpi__value').textContent,
+      status: [...document.querySelectorAll('.chart')].find(c => /حسب الحالة/.test(c.textContent)).querySelectorAll('.chart__value') ? [...[...document.querySelectorAll('.chart')].find(c => /حسب الحالة/.test(c.textContent)).querySelectorAll('.chart__value')].map(v => v.textContent).join('/') : '' };`);
+    const fmt = v => (v === null ? '—' : v + '%');
+    const expCards = ['ARAB', 'QS'].filter(k => o.rankings[k]).map(k => fmt(o.rankings[k].readiness) + '/' + fmt(o.rankings[k].progress));
+    const ok = ui.kpis === o.kpis && JSON.stringify(ui.cards) === JSON.stringify(expCards) && JSON.stringify(Object.entries(ui.ents).sort()) === JSON.stringify(Object.entries(o.entities).sort()) &&
+      ins.overall === fmt(o.overall) && ins.status === o.byStatus;
+    return { ok, detail: label + ': KPI ' + ui.kpis + ' (المرجع ' + o.kpis + ') · بطاقات ' + ui.cards.join(' ، ') + ' (المرجع ' + expCards.join(' ، ') + ') · الكلي ' + ins.overall + ' · الحالات ' + ins.status + (ok ? '' : ' · جهات UI ' + JSON.stringify(ui.ents) + ' مرجع ' + JSON.stringify(o.entities)) };
+  }
+  const acc1 = await compareWithOracle(fixture, 'البيانات الأولية');
+  check('Q-03', 'دقة الإحصاءات: لوحة القيادة والتحليل تطابق مرجعًا مستقلًا محسوبًا في Node (AC-PRG-01/02، AC-DEC-03، AC-RPT-01/02)', acc1.ok, acc1.detail);
+
+  // Q-04 إضافة متطلب متأخر بلوحة المفاتيح فقط، ثم مطابقة الأرقام بعد التغيير
+  await p.route('#/requirements/new');
+  await p.eval('document.getElementById("r-title").focus(); return true;');
+  await p.typeText('متطلب مضاف بلوحة المفاتيح');
+  const tabOrder = [];
+  for (let i = 0; i < 14; i++) {
+    await p.key('Tab', 'Tab', 9);
+    tabOrder.push(await p.eval('const a = document.activeElement; return a.name || a.textContent.trim().slice(0, 12);'));
+  }
+  // Enter داخل حقل العنوان يرسل النموذج، فتظهر أخطاء الحقول الناقصة ولا يُحفظ شيء
+  await p.eval('document.getElementById("r-title").focus(); return true;');
+  await press('Enter', 13);
+  const enterErr = await p.eval('return { ind: (document.getElementById("r-indicator-error") || {}).textContent || "", saved: !!localStorage.getItem("basira.v1") };');
+  // اختيار المؤشر والجهة بالأسهم، وكتابة التاريخ بالأرقام
+  for (const id of ['r-indicator', 'r-entity']) {
+    await p.eval('document.getElementById("' + id + '").focus(); return true;');
+    const k = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40 };
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, k));
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, k));
+    await sleep(80);
+  }
+  await p.eval('document.getElementById("r-deadline").focus(); return true;');
+  // ترتيب حقول التاريخ في المتصفح المختبر: يوم/شهر/سنة
+  for (const ch of '30102026') {
+    const k = { key: ch, code: 'Digit' + ch, text: ch, windowsVirtualKeyCode: 48 + Number(ch), nativeVirtualKeyCode: 48 + Number(ch) };
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, k));
+    await p.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, k));
+    await sleep(40);
+  }
+  const formVals = await p.eval('return ["r-indicator", "r-entity", "r-deadline"].map(id => document.getElementById(id).value).join(" | ");');
+  await p.eval('document.getElementById("r-title").focus(); return true;');
+  await press('Enter', 13);
+  const kb = await p.eval('return { hash: location.hash, n: (JSON.parse(localStorage.getItem("basira.v1") || "{}").requirements || []).length, errs: [...document.querySelectorAll(".field__error, .form-summary")].map(e => e.textContent).filter(Boolean).join(" / ") };');
+  check('Q-04', 'لوحة المفاتيح فقط: الانتقال بين حقول نموذج المتطلب بـ Tab، وEnter يرسل، والأسهم تختار، والكتابة تملأ التاريخ (AC-UI-05، AC-CRUD-01)',
+    /يرجى اختيار المؤشر/.test(enterErr.ind) && !enterErr.saved && kb.n === 7 && /^#\/requirements\/req-/.test(kb.hash) && tabOrder.includes('indicatorId') && tabOrder.includes('entityId') && tabOrder.includes('deadline'),
+    'ترتيب Tab: ' + tabOrder.join(' ← ') + ' · القيم: ' + formVals + ' · ' + kb.hash + (kb.errs ? ' · أخطاء: ' + kb.errs : ''));
+  const acc2 = kb.n === 7 ? await compareWithOracle(await stored(), 'بعد الإضافة') : { ok: false, detail: 'لم يُحفظ المتطلب في Q-04، فلا مقارنة' };
+  check('Q-05', 'دقة الإحصاءات بعد إضافة متطلب: الأرقام تتحدث وتطابق المرجع المستقل', acc2.ok, acc2.detail);
+
+  // Q-06 حذف بلوحة المفاتيح: Esc يلغي، وEnter على «تأكيد الحذف» يحذف (AC-CRUD-03، AC-CRUD-04)
+  const newId = kb.hash.split('/').pop();
+  await p.route(kb.hash);
+  await p.eval('[...document.querySelectorAll("#main .page-actions button")].find(b => b.textContent.trim() === "حذف").focus(); return true;');
+  await press('Enter', 13);
+  const dlgFocus = await p.eval('return document.getElementById("dialog").open + ":" + document.activeElement.textContent.trim();');
+  await press('Escape', 27);
+  await sleep(150);
+  const afterEsc = (await stored()).requirements.length;
+  await p.eval('[...document.querySelectorAll("#main .page-actions button")].find(b => b.textContent.trim() === "حذف").focus(); return true;');
+  await press('Enter', 13);
+  await press('Tab', 9, true);
+  const onConfirm = await p.eval('return document.activeElement.textContent.trim();');
+  await press('Enter', 13);
+  await sleep(250);
+  const afterDel = await stored();
+  await p.route('#/requirements');
+  const listCount = await textOf('.result-count');
+  check('Q-06', 'الحذف بلوحة المفاتيح: التركيز على «إلغاء»، وEsc لا يحذف، وShift+Tab ثم Enter على «تأكيد الحذف» يحذف وينقص العدد',
+    dlgFocus === 'true:إلغاء' && afterEsc === 7 && onConfirm === 'تأكيد الحذف' && afterDel.requirements.length === 6 && !afterDel.requirements.some(r => r.id === newId) && listCount === 'عدد النتائج: 6 من 6',
+    dlgFocus + ' · بعد Esc: ' + afterEsc + ' · ' + onConfirm + ' · ' + listCount);
+
+  // Q-07 تعديل F4 من التغيير السريع دون تغيير بقية الحقول (AC-CRUD-02)
+  const f4Before = (await stored()).requirements.find(r => r.id === 'req-f4');
+  await p.route('#/requirements/req-f4');
+  await setv('#q-status', 'in_progress');
+  await p.clickSelector('.inline-form button[type=submit]');
+  const f4After = (await stored()).requirements.find(r => r.id === 'req-f4');
+  const same = Object.keys(f4Before).filter(k => !['status', 'updatedAt'].includes(k)).every(k => JSON.stringify(f4Before[k]) === JSON.stringify(f4After[k]));
+  await p.route('#/requirements?status=in_progress');
+  const inProg = await rowIds();
+  check('Q-07', 'تعديل حالة F4 إلى «قيد التنفيذ»: تتغير الحالة في القائمة دون تغيير بقية الحقول (AC-CRUD-02)', f4After.status === 'in_progress' && same && inProg === 'req-f1,req-f4', inProg);
+
+  // Q-08 البحث والتصفية: ترتيب الخطوات، والعداد، و«مسح الكل»، ورسالة «لا نتائج» وزرها
+  await p.route('#/requirements');
+  await setv('#f-ranking', 'ARAB');
+  await p.clickSelector('#q'); await p.typeText('بيانات');
+  const a1 = await rowIds();
+  const c1 = await textOf('.result-count');
+  await p.route('#/dashboard'); await p.route('#/requirements');
+  await p.clickSelector('#q'); await p.typeText('بيانات');
+  await setv('#f-ranking', 'ARAB');
+  const a2 = await rowIds();
+  await setv('#f-priority', 'high'); await setv('#f-due', 'overdue');
+  await p.clickSelector('.filters__actions button', 'مسح الكل');
+  const cleared = await p.eval('return { q: document.getElementById("q").value, sel: [...document.querySelectorAll(".filters select")].filter(s => s.name !== "sort").map(s => s.value).join(""), count: document.querySelector(".result-count").textContent, focus: document.activeElement.id, hash: location.hash };');
+  await p.clickSelector('#q'); await p.typeText('براكين');
+  const empty = await textOf('#main .empty');
+  await p.clickSelector('#main .empty button');
+  const afterEmpty = await textOf('.result-count');
+  check('Q-08', 'البحث والتصفية: الترتيبان يعطيان النتيجة نفسها، والعداد صحيح، و«مسح الكل» يعيد الكل، و«لا نتائج» مع زر يعمل (AC-FLT-08/09/10، AC-SRCH-03)',
+    a1 === a2 && a1 === 'req-f6' && c1 === 'عدد النتائج: 1 من 6' && cleared.q === '' && cleared.sel === '' && cleared.count === 'عدد النتائج: 6 من 6' && cleared.focus === 'q' && /لا توجد نتائج مطابقة/.test(empty) && afterEmpty === 'عدد النتائج: 6 من 6',
+    'تصفية ثم بحث: ' + a1 + ' · بحث ثم تصفية: ' + a2 + ' · ' + c1 + ' · بعد المسح: ' + cleared.count + ' (' + cleared.hash + ')');
+
+  // Q-09 المتابعات: الترتيب والاستمرار و«آخر متابعة» ورفض الفارغة (AC-FUP-01/02/03/04/05)
+  await p.route('#/requirements/req-f2');
+  const fuForm = '#followups-title ~ div form ';
+  await setv(fuForm + '[name=outcome]', 'promised');
+  await p.clickSelector(fuForm + 'button[type=submit]');
+  const emptyNote = await p.eval('return (document.getElementById("fu-note-error") || {}).textContent || "";');
+  await setv(fuForm + '[name=date]', '2026-10-28'); await setv(fuForm + '[name=outcome]', 'no_reply');
+  await p.clickSelector(fuForm + '[name=note]'); await p.typeText('اتصال أول بالجهة');
+  await p.clickSelector(fuForm + 'button[type=submit]');
+  await setv(fuForm + '[name=date]', '2026-10-31'); await setv(fuForm + '[name=outcome]', 'promised');
+  await p.clickSelector(fuForm + '[name=note]'); await p.typeText('وعد بالتسليم خلال يومين');
+  await p.clickSelector(fuForm + 'button[type=submit]');
+  await p.goto(APP + '#/requirements/req-f2');
+  const timeline = await p.eval('return [...document.querySelectorAll(".timeline > li")].map(li => li.querySelector("p:nth-child(2)").textContent);');
+  await p.route('#/requirements?q=' + encodeURIComponent('الدوليين'));
+  const lastCol = await p.eval('const row = document.querySelector("#main tbody tr"); return row ? row.lastElementChild.textContent : "";');
+  check('Q-09', 'المتابعات: الفارغة تُرفض، والأحدث أولًا، وتبقى بعد إعادة التحميل، وعمود «آخر متابعة» يعرض تاريخ الأحدث',
+    /الملاحظة/.test(emptyNote) && timeline[0] === 'وعد بالتسليم خلال يومين' && timeline[1] === 'اتصال أول بالجهة' && /31/.test(lastCol), 'الرفض: ' + emptyNote + ' · الترتيب: ' + timeline.join(' ← ') + ' · آخر متابعة: ' + lastCol);
+
+  // Q-10 محتوى الصفحات: التجميع، والعام الماضي، والتعارض، وتقرير الاجتماع، والشارات النصية، والمسار المجهول، وF3 المكتمل دون دليل
+  await p.route('#/rankings?ranking=ARAB');
+  const groups = await p.eval('return { heads: [...document.querySelectorAll("#main h2, #main h3")].map(e => e.textContent).filter(t => /التعليم والتعلم/.test(t)).length, rows: document.querySelectorAll("#main .row-link, #main tbody tr").length };');
+  await p.route('#/indicators/ind-ar-edu-1');
+  const ind1 = await textOf('#main');
+  await p.route('#/indicators/ind-ar-edu-8');
+  const ind8 = await textOf('#main');
+  await p.route('#/reports');
+  const meeting = await p.eval('const row = [...document.querySelectorAll("#main tbody tr")].find(tr => /AR-EDU-1/.test(tr.textContent)); return row ? row.textContent : "";');
+  await p.route('#/requirements');
+  const badges = await p.eval('return [...document.querySelectorAll("#main .badge")].map(b => b.textContent).filter(t => /متأخر|قريب/.test(t)).length;');
+  await p.route('#/does-not-exist');
+  await sleep(200);
+  const nf = await p.eval('return { hash: location.hash, toast: [...document.querySelectorAll(".toast")].map(t => t.textContent).join(" ") };');
+  await p.route('#/requirements/req-f3');
+  const f3 = await textOf('#conditions, #main .checklist');
+  check('Q-10', 'المحتوى: تجميع المؤشرات بالمعيار، والعام الماضي، ووسم التعارض، وتقرير الاجتماع (I1 بتعارض وF1 متأخر)، وشارات نصية، والمسار المجهول، وF3 المكتمل يُظهر «لا يوجد رابط دليل»',
+    groups.heads >= 1 && /1:19/.test(ind1) && /يختلف عن ملف التقدم|تعارض/.test(ind1) && !/يختلف عن ملف التقدم/.test(ind8) && /تعارض/.test(meeting) && /متأخر/.test(meeting) && badges >= 4 &&
+    nf.hash === '#/dashboard' && /الصفحة غير موجودة/.test(nf.toast) && /لا يوجد رابط دليل/.test(f3),
+    'شارات المواعيد: ' + badges + ' · المسار المجهول ← ' + nf.hash + ' · F3: «' + f3 + '»');
+
+  // Q-11 العربية وRTL في كل الصفحات: لا كلمات لاتينية خارج المصطلحات المسموحة، ولا undefined/NaN/null
+  const ALLOWED = /^(QS|CSV|JSON|Scopus|SciVal|FTE|Excel|PDF|UTF|BOM|AARU|L[0-4]|Tab|https?|example|org|basira|evidence|ar|edu)$/i;
+  const leaks = [];
+  async function scanArabic(label) {
+    for (const r of ROUTES) {
+      await p.route(r);
+      const res = await p.eval(`const texts = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (w.nextNode()) { const n = w.currentNode; const el = n.parentElement; if (!el || el.closest('script,style,svg,.visually-hidden') || !el.getClientRects().length) continue; texts.push(n.textContent); }
+        document.querySelectorAll('[placeholder],[aria-label],[title]').forEach(e => ['placeholder', 'aria-label', 'title'].forEach(a => { if (e.getAttribute(a)) texts.push(e.getAttribute(a)); }));
+        return { dir: document.documentElement.dir, mainDir: getComputedStyle(document.getElementById('main')).direction, text: texts.join(' \\n ') };`);
+      const cleaned = res.text.replace(/https?:\/\/\S+/g, ' ').replace(/\b[A-Z]{2,}(-[A-Z0-9]+)+\b/g, ' ').replace(/basira-[\w-]+\.(json|csv)/g, ' ');
+      const words = (cleaned.match(/[A-Za-z][A-Za-z]+/g) || []).filter(x => !ALLOWED.test(x));
+      if (res.dir !== 'rtl' || res.mainDir !== 'rtl') leaks.push(label + r + ' اتجاه ' + res.dir + '/' + res.mainDir);
+      if (words.length) leaks.push(label + r + ': ' + [...new Set(words)].join(','));
+      if (/\b(undefined|NaN|null)\b|\[object/.test(res.text)) leaks.push(label + r + ': قيمة برمجية ظاهرة');
+    }
+  }
+  await scanArabic('');
+  await p.goto(DEMO + '#/dashboard');
+  await scanArabic('عرض ');
+  check('Q-11', 'العربية وRTL في كل الصفحات (بيانات الفحص وبيانات العرض): الاتجاه rtl، ولا نصوص إنجليزية خارج المصطلحات، ولا قيم برمجية ظاهرة (AC-UI-02/03)', !leaks.length, leaks.join(' | ') || (ROUTES.length * 2) + ' صفحة');
+
+  // Q-12 الجوال: أهداف اللمس ≥ 24px وحجم الخط ≥ 12px في كل الصفحات
+  await p.goto(APP + '#/dashboard');
+  await p.viewport(375, 812, true);
+  const small = [];
+  for (const r of ROUTES) {
+    await p.route(r);
+    const res = await p.eval(`const out = []; document.querySelectorAll('button, select, input:not([type=hidden]), textarea, summary, .btn, .bnav__link, .nav__link').forEach(e => {
+        if (e.closest('.visually-hidden') || !e.getClientRects().length || getComputedStyle(e).visibility === 'hidden') return; const lab = e.matches('input[type=checkbox], input[type=radio]') && e.closest('label'); const b = (lab || e).getBoundingClientRect(); if (b.width === 0) return;
+        if (b.height < 24 || b.width < 24) out.push((e.textContent || e.name || e.tagName).trim().slice(0, 20) + ' ' + Math.round(b.width) + 'x' + Math.round(b.height)); });
+      const tiny = [...document.querySelectorAll('#main *')].filter(e => e.childNodes.length && [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) && e.getClientRects().length && parseFloat(getComputedStyle(e).fontSize) < 12).length;
+      return { out, tiny };`);
+    if (res.out.length || res.tiny) small.push(r + ' ' + res.out.join(',') + (res.tiny ? ' خط صغير=' + res.tiny : ''));
+  }
+  await p.viewport(1280, 900, false);
+  check('Q-12', 'الجوال 375: كل أهداف اللمس 24px فأكثر، ولا نص أصغر من 12px، في كل الصفحات', !small.length, small.join(' | ') || ROUTES.length + ' صفحة');
+
+  // Q-14 عمود «متطلبات مفتوحة» لكل مؤشر يطابق المرجع المستقل (AC-IND-01، AC-RPT-03)
+  const nowData = await stored();
+  const openBy = {};
+  nowData.requirements.filter(r => r.status !== 'done').forEach(r => { openBy[r.indicatorId] = (openBy[r.indicatorId] || 0) + 1; });
+  const indMismatch = [];
+  for (const rk of ['ARAB', 'QS']) {
+    await p.route('#/rankings?ranking=' + rk);
+    const cells = await p.eval(`return [...document.querySelectorAll('#main tbody tr')].map(tr => { const a = tr.querySelector('a.row-link'); const td = tr.querySelectorAll('td'); return [decodeURIComponent(a.getAttribute('href').split('/').pop()), td[td.length - 1].textContent.trim(), td[2].textContent.trim()]; });`);
+    cells.forEach(([id, n, work]) => { if (String(openBy[id] || 0) !== n || !work) indMismatch.push(id + ':' + n + '≠' + (openBy[id] || 0)); });
+    if (!cells.length) indMismatch.push(rk + ': لا صفوف');
+  }
+  check('Q-14', 'المؤشرات: لكل مؤشر حالة عمل وعدد متطلبات مفتوحة يطابق المرجع المستقل، في التصنيفين (AC-IND-01، AC-RPT-03)', !indMismatch.length, indMismatch.join(' ') || 'كل الصفوف مطابقة (' + Object.values(openBy).reduce((a, b) => a + b, 0) + ' مفتوحًا)');
+
+  // Q-15 تقرير ما قبل الاجتماع يذكر سؤال D1 المفتوح في «قرارات مطلوبة» (AC-RPT-08)
+  await p.route('#/reports?type=meeting&ranking=ARAB');
+  const decisionsPart = await p.eval('const h = [...document.querySelectorAll("#main h3")].find(e => /قرارات مطلوبة/.test(e.textContent)); return h && h.nextElementSibling ? h.nextElementSibling.textContent : "";');
+  check('Q-15', 'تقرير ما قبل الاجتماع: قسم «قرارات مطلوبة» يذكر سؤال D1 لمؤشر AR-EDU-1 (AC-RPT-08)', /AR-EDU-1/.test(decisionsPart) && /أي رقم نعتمد لعدد أعضاء هيئة التدريس/.test(decisionsPart), decisionsPart.slice(0, 90));
+
+  // Q-16 «إعادة البيانات التجريبية» ثم «إلغاء» لا يغيّر شيئًا (AC-PER-05)
+  const beforeReset = await p.eval("return localStorage.getItem('basira.v1');");
+  await p.clickSelector('#data-button');
+  await p.clickSelector('.dialog button', 'إعادة البيانات التجريبية');
+  const resetDlg = await p.eval('return document.querySelector(".dialog__title").textContent;');
+  await p.clickSelector('.dialog button', 'إلغاء');
+  await sleep(200);
+  const afterCancel = await p.eval("return localStorage.getItem('basira.v1');");
+  check('Q-16', '«إعادة البيانات التجريبية» ثم «إلغاء»: لا يتغير أي شيء في البيانات المحفوظة (AC-PER-05)', /إعادة البيانات التجريبية/.test(resetDlg) && afterCancel === beforeReset && !!beforeReset, resetDlg + ' ← بلا تغيير: ' + (afterCancel === beforeReset));
+
+  const outside = qaRequests.filter(u => !/^(file|blob|data|about|devtools):/.test(u));
+  check('Q-17', 'لا أي طلب شبكة خارجي طوال التحقق الشامل (كل الصفحات والعمليات)', qaRequests.length > 0 && !outside.length, outside.join(', ') || qaRequests.length + ' طلبًا محليًا فقط');
+  check('Q-13', 'لا أخطاء في وحدة التحكم طوال التحقق الشامل', !p.errors.length, p.errors.join(' | ') || 'صفر');
+  await cdp.send('Target.closeTarget', { targetId: p.targetId });
+}
+
 // ---------- التشغيل ----------
 async function main() {
   const browser = CANDIDATES.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } });
@@ -697,12 +1027,14 @@ async function main() {
     }
     if (!port) throw new Error('لم يبدأ المتصفح في وضع التحكم');
     const version = await (await fetch('http://127.0.0.1:' + port + '/json/version')).json();
+    BROWSER_NAME = version.Browser;
     console.log('المتصفح: ' + version.Browser + ' · الصفحة: ' + APP + '\n');
     cdp = createClient(version.webSocketDebuggerUrl);
     await cdp.opened;
     const pdfPath = await run(cdp, tmp);
     await runPhase4(cdp);
     await runPhase5(cdp, tmp);
+    await runQA(cdp);
     if (ARTIFACTS) console.log('\nPDF الطباعة: ' + pdfPath);
   } catch (err) {
     check('E-ERR', 'خطأ في تشغيل الفحص', false, err.message);
@@ -716,6 +1048,10 @@ async function main() {
     try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch (e) { console.log('تنبيه: تعذر حذف المجلد المؤقت ' + tmp + ': ' + e.message); }
   }
   const failed = results.filter(r => !r.ok);
+  // ملف نتائج اختياري يقرؤه مولّد TEST_REPORT.md (tests/report/build-report.js)
+  if (process.env.BASIRA_E2E_JSON) {
+    fs.writeFileSync(process.env.BASIRA_E2E_JSON, JSON.stringify({ ranAt: new Date().toISOString(), browser: BROWSER_NAME, results }, null, 2));
+  }
   console.log('\nالنتيجة: ' + (results.length - failed.length) + ' ناجح، ' + failed.length + ' فاشل من ' + results.length);
   process.exit(failed.length ? 1 : 0);
 }

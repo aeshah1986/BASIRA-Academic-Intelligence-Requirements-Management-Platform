@@ -188,6 +188,8 @@ img, svg, table { max-width: 100%; }
   background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; font-weight: 600; color: var(--turq-700); text-decoration: underline; text-underline-offset: 3px;
 }
+/* زر نصي داخل شريط التنبيه: هدف لمس لا يقل عن 32px (وُجد 23px في فحص Q-12) */
+.banner .link-button { min-block-size: 32px; }
 .more-link { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; margin-block-start: 12px; text-decoration: none; }
 
 /* ---------- البطاقات والشبكات ---------- */

@@ -142,8 +142,11 @@
 
     // شروط الاكتمال وجودة البيانات من محرك التحليل (js/insights.js).
     var check = I.requirementConditions(r, ctx.data, ctx.today);
+    // المكتمل القديم قد يكون دون دليل (AC-CMP-02)، فيُعرض شرطا الاكتمال كما هما.
     var checklist = r.status === 'done'
-      ? h('p', { class: 'muted' }, 'المتطلب مكتمل.')
+      ? h('ul', { class: 'checklist', id: 'conditions' },
+        h('li', { class: r.missingData ? 'is-no' : 'is-yes' }, B.dom.icon(r.missingData ? 'close' : 'check'), r.missingData ? 'توجد بيانات ناقصة مسجلة' : 'لا نواقص مسجلة'),
+        h('li', { class: link ? 'is-yes' : 'is-no' }, B.dom.icon(link ? 'check' : 'close'), link ? 'يوجد رابط دليل' : 'لا يوجد رابط دليل'))
       : h('ul', { class: 'checklist', id: 'conditions' }, check.conditions.map(function (c) {
         return h('li', { class: c.met ? 'is-yes' : 'is-no' }, B.dom.icon(c.met ? 'check' : 'close'), c.label,
           c.group === 'blocking' ? h('span', { class: 'muted small' }, ' (شرط اكتمال)') : null);
@@ -169,7 +172,7 @@
         U.card('البيانات', info),
         h('div', { class: 'stack' },
           U.card('الحالة', statusForm),
-          U.card('شروط الاكتمال', h('div', null, checklist, h('p', { class: 'muted small' }, r.status === 'done' ? '' : 'مستوفٍ ' + check.met + ' من ' + check.total + '. لاكتمال المتطلب يلزم الشرطان الأولان.'))))),
+          U.card('شروط الاكتمال', h('div', null, checklist, h('p', { class: 'muted small' }, r.status === 'done' ? 'المتطلب مكتمل.' : 'مستوفٍ ' + check.met + ' من ' + check.total + '. لاكتمال المتطلب يلزم الشرطان الأولان.'))))),
       analysisCard(ctx, r),
       U.card('الأدلة (' + evidence.length + ')', h('div', { class: 'stack' },
         evidence.length ? U.evidenceList(ctx, evidence) : h('p', { class: 'muted' }, 'لا أدلة مسجلة لهذا المتطلب.'),
