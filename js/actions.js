@@ -488,6 +488,62 @@
     return { ok: true, id: code };
   }
 
+  // ---------- محرك الحساب (docs/design/06) ----------
+  /*
+   * يحفظ تشغيلًا: إعداد الدورة، ووصف الملفات (دون محتواها)، والنتيجة المجمعة (engine.storableRun).
+   * يُحتفظ بآخر 10 تشغيلات فقط لكل دورة.
+   */
+  function recordCalcRun(data, cycle, storable, sourcesMeta, env) {
+    if (!cycle || !cycle.id || !storable || !Array.isArray(storable.results)) return fail({}, 'بيانات التشغيل غير صالحة.');
+    if (!data.calc || typeof data.calc !== 'object') data.calc = { cycles: [] };
+    if (!Array.isArray(data.calc.cycles)) data.calc.cycles = [];
+    var saved = find(data.calc.cycles, cycle.id);
+    var copy = JSON.parse(JSON.stringify({ id: cycle.id, ranking: cycle.ranking, label: cycle.label, params: cycle.params, inputs: cycle.inputs, recipes: cycle.recipes }));
+    copy.sources = (sourcesMeta || []).map(function (s) {
+      return { slot: s.slot, fileName: s.fileName, uploadedAt: s.uploadedAt || '', rowCount: s.rowCount, headerRow: s.headerRow, columns: (s.columns || []).slice(), sheet: s.sheet || '' };
+    });
+    copy.runs = saved && Array.isArray(saved.runs) ? saved.runs.slice() : [];
+    copy.runs.unshift(JSON.parse(JSON.stringify(storable)));
+    if (copy.runs.length > 10) copy.runs.length = 10;
+    if (saved) data.calc.cycles[data.calc.cycles.indexOf(saved)] = copy; else data.calc.cycles.push(copy);
+    var ok = storable.results.filter(function (r) { return r.value !== null && !r.error; }).length;
+    log(data, env, 'calc_run', 'calc', cycle.id, 'شُغّل محرك الحساب (' + cycle.label + '): ' + ok + ' من ' + storable.results.length + ' مؤشرات بنتيجة.');
+    return { ok: true, id: cycle.id, info: { withValue: ok } };
+  }
+
+  /*
+   * «اعتماد القيمة» (AC-CALC-10، G1): تحديث القيمة الحالية ومصدرها فقط، لا حالة العمل.
+   */
+  function approveCalculatedValue(data, indicatorId, input, env) {
+    var ind = find(data.indicators, indicatorId);
+    if (!ind) return fail({}, 'المؤشر غير موجود.');
+    if (ind.active === false) return fail({}, 'المؤشر معطل، فلا تُعتمد له قيمة.');
+    var value = clean(input.value);
+    var source = clean(input.source);
+    var errors = {};
+    if (!value) errors.value = 'لا توجد قيمة محسوبة لاعتمادها.';
+    else if (value.length > 30) errors.value = 'القيمة أطول من 30 حرفًا.';
+    if (!source) errors.source = 'مصدر الرقم مطلوب.';
+    else if (source.length > 200) errors.source = 'النص أطول من 200 حرف.';
+    if (hasErrors(errors)) return fail(errors);
+    var old = ind.currentValue;
+    ind.currentValue = value;
+    ind.valueSource = source;
+    log(data, env, 'calc_approve', 'indicator', ind.id, 'اعتُمدت القيمة المحسوبة للمؤشر ' + ind.code + ': ' + value + (old ? ' (كانت ' + old + ')' : '') + '.');
+    return { ok: true, id: ind.id, info: { previous: old } };
+  }
+
+  /*
+   * متطلب من تنبيه المحرك (G2). suggestion من engine.suggestRequirement. لا يُكرر متطلبًا مفتوحًا بالعنوان نفسه.
+   */
+  function createRequirementFromWarning(data, suggestion, env) {
+    if (!suggestion || !suggestion.input) return fail({}, 'لا يوجد اقتراح صالح.');
+    if (suggestion.existingId && find(data.requirements, suggestion.existingId)) {
+      return Object.assign(fail({}, 'يوجد متطلب مفتوح بالعنوان نفسه لهذا المؤشر، فلم يُنشأ متطلب مكرر.'), { info: { existingId: suggestion.existingId } });
+    }
+    return createRequirement(data, suggestion.input, env);
+  }
+
   function logEvent(data, env, action, summary) {
     log(data, env, action, 'data', '', summary);
   }
@@ -516,6 +572,9 @@
     deleteEvidence: deleteEvidence,
     addDecision: addDecision,
     resolveDecision: resolveDecision,
+    recordCalcRun: recordCalcRun,
+    approveCalculatedValue: approveCalculatedValue,
+    createRequirementFromWarning: createRequirementFromWarning,
     recordLetterSent: recordLetterSent,
     updateLetterTemplate: updateLetterTemplate,
     resetLetterTemplate: resetLetterTemplate,

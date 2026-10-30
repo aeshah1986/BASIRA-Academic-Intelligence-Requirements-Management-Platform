@@ -183,7 +183,32 @@
       }
     }
 
+    validateCalc(data.calc, rankingIds, errors);
+
     return { ok: errors.length === 0, errors: errors };
+  }
+
+  // بيانات محرك الحساب (اختيارية، docs/design/06 §11). لا يُقبل أي محتوى ملف: وصف الملف بمفاتيح محددة فقط (06 §9).
+  var CALC_OPS = ['pick', 'count', 'countWhere', 'countDistinct', 'sum', 'manual', 'countDistinctAcross'];
+  var SOURCE_KEYS = ['slot', 'fileName', 'uploadedAt', 'rowCount', 'headerRow', 'columns', 'sheet'];
+  function validateCalc(calc, rankingIds, errors) {
+    if (calc === undefined) return;
+    if (!isObject(calc) || !Array.isArray(calc.cycles)) { errors.push('بيانات محرك الحساب «calc» غير صالحة.'); return; }
+    calc.cycles.forEach(function (c, i) {
+      var where = 'دورة الحساب رقم ' + (i + 1);
+      if (!isObject(c) || !isNonEmptyString(c.id) || !isNonEmptyString(c.label)) { errors.push(where + ' غير صالحة.'); return; }
+      if (!rankingIds[c.ranking]) errors.push(where + ' تتبع تصنيفًا غير موجود.');
+      if (!isObject(c.params) || !(typeof c.params.hIndexThreshold === 'number' && c.params.hIndexThreshold > 0)) errors.push(where + ': معامل عتبة هيرش غير صالح.');
+      if (!Array.isArray(c.inputs) || c.inputs.some(function (x) { return !isObject(x) || !isNonEmptyString(x.key) || CALC_OPS.indexOf(x.op) === -1 || !isObject(x.args); })) errors.push(where + ': المدخلات غير صالحة.');
+      if (!Array.isArray(c.recipes) || c.recipes.some(function (r) { return !isObject(r) || !isNonEmptyString(r.indicatorCode) || !isNonEmptyString(r.formula) || ['higher_better', 'lower_better'].indexOf(r.direction) === -1; })) errors.push(where + ': الوصفات غير صالحة.');
+      if (!Array.isArray(c.sources)) errors.push(where + ': وصف الملفات ليس قائمة.');
+      else c.sources.forEach(function (s) {
+        if (!isObject(s) || Object.keys(s).some(function (k) { return SOURCE_KEYS.indexOf(k) === -1; }) || typeof s.rowCount !== 'number' || !Array.isArray(s.columns)) {
+          errors.push(where + ': وصف ملف غير صالح أو يحتوي بيانات غير مسموحة (لا يُخزن محتوى الملفات).');
+        }
+      });
+      if (!Array.isArray(c.runs) || c.runs.length > 10 || c.runs.some(function (r) { return !isObject(r) || !Array.isArray(r.results); })) errors.push(where + ': سجل التشغيلات غير صالح.');
+    });
   }
 
   // يعيد localStorage إذا كان يعمل فعلًا، وإلا null (مثل التصفح الخاص المقيد أو Node).
