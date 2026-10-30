@@ -102,6 +102,31 @@
     }));
   }
 
+  // نتائج الحساب من الملفات المصدرية (أحدث نتيجة محفوظة من صفحة «مصادر البيانات والحساب»).
+  function calcCard(ctx) {
+    var fd = B.engine.findings(ctx.data);
+    if (!fd) {
+      return U.card('نتائج الحساب من الملفات', h('p', { class: 'muted' }, 'لم تُرفع ملفات مصدر بعد. ',
+        h('a', { href: '#/calculate' }, 'مصادر البيانات والحساب'), ': رفع ملفات العمادات وحساب قيم المؤشرات منها.'), { id: 'calc-findings-title' });
+    }
+    var c = fd.counts;
+    return U.card('نتائج الحساب من الملفات', h('div', { class: 'stack' },
+      h('p', { class: 'small', id: 'calc-findings-summary' }, 'حُسب ' + c.computed + ' من ' + U.countIndicators(c.total) + ' · بانتظار الاعتماد ' + c.pending + ' · تعارض مع ملف التقدم ' + c.conflicts +
+        ' · الملفات: ' + (fd.sources.map(function (s) { return s.fileName; }).join('، ') || '—') + ' · ' + B.format.formatDate(fd.at)),
+      U.responsiveTable('نتائج الحساب', [
+        { label: 'المؤشر', cls: 'col-main', cell: function (x) { return x.indicator ? h('a', { href: '#/indicators/' + encodeURIComponent(x.indicator.id) }, B.dom.ltr(x.code, 'strong'), ' ', x.indicator.name) : B.dom.ltr(x.code); } },
+        { label: 'المحسوبة', cell: function (x) { return x.value === null ? h('span', { class: 'muted small' }, x.error) : B.dom.ltr(x.value, 'strong'); } },
+        { label: 'الحالية', cell: function (x) { return B.dom.ltr(x.current || '—'); } },
+        { label: 'ملف التقدم', cell: function (x) { return h('span', null, B.dom.ltr(x.progressFileValue || '—'), x.conflict ? [' ', B.dom.badge('تعارض', 'danger')] : null); } },
+        { label: 'التقدم عن العام الماضي', cell: function (x) {
+          return h('span', { class: 'stack-xs' }, h('span', null, x.yoy.label),
+            x.lastYearValue ? h('span', { class: 'muted small' }, B.dom.ltr(x.lastYearValue), x.lastYearSource === 'file' ? ' · من ملف العام الماضي' : ' · مكتوبة في المؤشر') : null);
+        } },
+        { label: 'الحالة', cell: function (x) { return U.calcStatusBadge(x.status); } }
+      ], fd.items, function (x) { return x.code; }),
+      h('a', { href: '#/calculate', class: 'more-link' }, 'فتح مصادر البيانات والحساب', B.dom.icon('chevron'))), { id: 'calc-findings-title' });
+  }
+
   function method() {
     var rows = [
       ['النواقص', 'لكل متطلب مفتوح: شرطا الاكتمال الرسميان (لا بيانات ناقصة، ورابط دليل)، وشروط جودة البيانات (مكلَّف، وموعد صالح قبل موعد تسليم التصنيف، وتواصل موثق إذا كان بانتظار الجهة أو متأخرًا).'],
@@ -147,6 +172,7 @@
         h('div', { class: 'kpi', id: 'kpi-incomplete' }, h('span', { class: 'kpi__value' }, String(incomplete.length)), h('span', { class: 'kpi__label' }, 'متطلبات غير مستوفية')),
         h('div', { class: 'kpi', id: 'kpi-overall' }, h('span', { class: 'kpi__value' }, c.overall.pct === null ? '—' : c.overall.pct + '%'), h('span', { class: 'kpi__label' }, 'الإنجاز الكلي (' + c.overall.done + ' من ' + c.overall.total + ')'))),
       U.card('التنبيهات العاجلة (' + al.length + ')', alertsList(al), { id: 'alerts-title' }),
+      calcCard(ctx),
       U.card('نسب الإنجاز من البيانات الفعلية', charts(ctx, c), { id: 'charts-title' }),
       U.card('ترتيب الأولويات مع التفسير', h('div', null,
         h('p', { class: 'muted small' }, 'الترتيب بمجموع نقاط القواعد المنطبقة، والأعلى أولًا. افتح «لماذا هذه الدرجة؟» لترى كل قاعدة ونقاطها.'),

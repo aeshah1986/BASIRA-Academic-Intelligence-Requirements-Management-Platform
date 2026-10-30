@@ -9,12 +9,12 @@
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('./format.js'), require('./model.js'), require('./derive.js'));
+    module.exports = factory(require('./format.js'), require('./model.js'), require('./derive.js'), require('./engine.js'));
   } else {
     root.Basira = root.Basira || {};
-    root.Basira.insights = factory(root.Basira.format, root.Basira.model, root.Basira.derive);
+    root.Basira.insights = factory(root.Basira.format, root.Basira.model, root.Basira.derive, root.Basira.engine);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (F, M, D) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (F, M, D, E) {
   'use strict';
 
   // ---------- الثوابت (قابلة للمراجعة في التوثيق) ----------
@@ -331,6 +331,20 @@
         out.push({ level: 'warning', kind: 'decision_stale', title: 'سؤال بلا قرار منذ ' + F.dayCount(age), detail: q.question, href: '#/followups?tab=decisions', sort: -age });
       }
     });
+    // نتائج الحساب من الملفات (docs/design/06): تعارض المحسوب، وقيمة بانتظار الاعتماد، وتنبيهات منهجية، وملاحظات جودة.
+    var fd = E && E.findings ? E.findings(data) : null;
+    if (fd) {
+      fd.items.forEach(function (x) {
+        if (!x.indicator || x.indicator.active === false || x.status === 'error') return;
+        var href = '#/indicators/' + encodeURIComponent(x.indicator.id);
+        if (x.conflict) out.push({ level: 'warning', kind: 'calc_conflict', title: 'المحسوب من الملفات يخالف ملف التقدم في ' + x.code, detail: 'المحسوبة ' + x.value + ' · ملف التقدم ' + x.progressFileValue, href: href, sort: 1 });
+        if (x.status === 'pending') out.push({ level: 'warning', kind: 'calc_pending', title: 'قيمة محسوبة بانتظار الاعتماد في ' + x.code, detail: 'المحسوبة ' + x.value + ' · الحالية ' + (x.current || 'فارغة'), href: href, sort: 2 });
+        if (x.warnings.length) out.push({ level: 'warning', kind: 'calc_warning', title: 'تنبيه منهجي من الحساب في ' + x.code, detail: x.warnings.join(' · '), href: '#/calculate', sort: 3 });
+      });
+      fd.sources.forEach(function (s) {
+        if (s.quality && s.quality.length) out.push({ level: 'warning', kind: 'calc_quality', title: 'ملاحظات جودة في الملف «' + s.fileName + '»', detail: s.quality.join(' · '), href: '#/calculate', sort: 4 });
+      });
+    }
     var rank = { danger: 0, warning: 1 };
     return out.sort(function (a, b) { return rank[a.level] - rank[b.level] || a.sort - b.sort || String(a.title).localeCompare(String(b.title), 'ar'); });
   }

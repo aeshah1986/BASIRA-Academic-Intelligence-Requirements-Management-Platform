@@ -16,34 +16,47 @@
   var A = B.actions;
 
   // ذاكرة الصفحة: لا تُكتب في التخزين أبدًا.
-  var session = { tables: {}, raw: {}, buffers: {}, info: {}, draft: null, lastRun: null, busy: {} };
+  var session = { tables: {}, raw: {}, buffers: {}, info: {}, lastTables: {}, lastInfo: {}, draft: null, lastRun: null, busy: {} };
 
-  var MAIN_SLOTS = ['admission', 'graduate', 'faculty', 'top500', 'form3', 'form4', 'form6', 'form7', 'form8'];
+  // ملفات القواعد الخاصة (المؤشرات 1 و2 و5). وخانات «ملف المؤشر» تُبنى من المؤشرات نفسها.
+  var SPECIAL_SLOTS = ['admission', 'graduate', 'faculty', 'top500'];
   var OPTIONAL_SLOTS = ['heqs', 'keymap'];
 
   function savedCycle(data) {
-    return data.calc && Array.isArray(data.calc.cycles) ? data.calc.cycles.filter(function (c) { return c.id === 'ARAB-2026'; })[0] : null;
+    return data.calc && Array.isArray(data.calc.cycles) ? data.calc.cycles.filter(function (c) { return c.id === 'CYCLE-2026'; })[0] : null;
   }
 
-  // المسودة: الدورة الافتراضية مع ما حُفظ من إعداد سابق (البنود والقيم والأعمدة والمعاملات).
+  /*
+   * المسودة تُبنى من المؤشرات الحالية في كل رسم (فيظهر المؤشر الجديد بخانته فورًا)، ثم تُنقل إليها
+   * الاختيارات السابقة من مسودة الجلسة أو من آخر إعداد محفوظ (البنود والرتب والأعمدة والمعاملات).
+   */
   function draftFor(data) {
-    if (session.draft) return session.draft;
-    var d = E.defaultCycle();
-    var saved = savedCycle(data);
-    if (saved) {
-      d.params = Object.assign({}, d.params, saved.params);
-      d.sources = (saved.sources || []).slice();
-      (saved.inputs || []).forEach(function (si) {
+    var d = E.defaultCycle(data.indicators);
+    var src = session.draft || savedCycle(data);
+    if (src) {
+      d.params = Object.assign({}, d.params, src.params);
+      d.sources = (src.sources || []).slice();
+      (src.inputs || []).forEach(function (si) {
         var mine = d.inputs.filter(function (x) { return x.key === si.key; })[0];
         if (mine && mine.op === si.op) mine.args = JSON.parse(JSON.stringify(si.args));
       });
-      (saved.recipes || []).forEach(function (sr) {
+      (src.recipes || []).forEach(function (sr) {
         var mine = d.recipes.filter(function (x) { return x.indicatorCode === sr.indicatorCode; })[0];
-        if (mine && mine.linkCheck && sr.linkCheck) mine.linkCheck.column = sr.linkCheck.column || '';
+        if (mine && mine.linkCheck && sr.linkCheck) { mine.linkCheck.column = sr.linkCheck.column || ''; mine.linkCheck.auto = sr.linkCheck.auto; }
       });
     }
     session.draft = d;
     return d;
+  }
+
+  // وصف الخانة: الخانات الخاصة من المحرك، وخانة «ملف المؤشر» من المؤشر نفسه.
+  function slotDef(ctx, slot) {
+    if (/^ind:/.test(slot)) {
+      var code = slot.slice(4);
+      var ind = ctx.data.indicators.filter(function (i) { return i.code === code; })[0];
+      return { label: code + (ind ? ' · ' + ind.name : ''), kind: 'list', hint: 'تُعدّ صفوفه التي فيها بيانات تلقائيًا دون أي اختيار، ويُفحص عمود الروابط إن وُجد.' };
+    }
+    return E.SLOTS[slot];
   }
 
   function rowsPhrase(n) {
@@ -53,23 +66,94 @@
     return n + ' صفًا';
   }
 
+  // ---------- الحساب التلقائي ----------
+  // وصف الملفات المسموح بتخزينه، مع ملاحظات الجودة (أرقام صفوف لا محتوى).
+  function sourcesMeta(ctx, draft) {
+    return Object.keys(session.tables).map(function (slot) {
+      var m = S.describe(session.tables[slot], session.info[slot].fileName, ctx.today);
+      m.slot = slot;
+      if (session.info[slot].sheet) m.sheet = session.info[slot].sheet;
+      m.quality = qualityFor(slot, session.tables[slot], draft);
+      return m;
+    }).concat(Object.keys(session.lastTables).map(function (slot) {
+      // ملف العام الماضي: الوصف نفسه بخانة «slot@last»
+      var m = S.describe(session.lastTables[slot], session.lastInfo[slot].fileName, ctx.today);
+      m.slot = slot + '@last';
+      return m;
+    }));
+  }
+
+  /*
+   * يُحسب تلقائيًا بعد كل رفع أو اختيار، وتُحفظ أحدث نتيجة فقط (setCalcLatest)، فتظهر فورًا في
+   * التحليل التشغيلي ولوحة القيادة وصفحة المؤشر. لا يُضاف شيء إلى سجل الأنشطة.
+   */
+  function autoRun(ctx, draft) {
+    if (!Object.keys(session.tables).length) return null;
+    var out = E.run(draft, session.tables, ctx.today);
+    // العام الماضي: يُحسب من ملفاته وحدها بالقواعد نفسها، ثم تُقارن القيمتان (عدد الصفوف قد يختلف).
+    if (Object.keys(session.lastTables).length) E.attachLastYear(out, E.run(draft, session.lastTables, ctx.today), draft);
+    session.lastRun = out;
+    var meta = sourcesMeta(ctx, draft);
+    draft.sources = meta;
+    var res = A.setCalcLatest(ctx.data, draft, E.storableRun(out), meta);
+    if (res.ok) ctx.save();
+    return out;
+  }
+
+  // تحديث النتائج وحدها دون إعادة رسم الصفحة (فلا يضيع التركيز في مربعات الاختيار).
+  function refreshResults(ctx, draft) {
+    var wrap = document.getElementById('calc-results-wrap');
+    if (!wrap) return;
+    B.dom.clear(wrap).appendChild(resultsCard(ctx, draft));
+  }
+
+  function changed(ctx, draft) {
+    autoRun(ctx, draft);
+    refreshResults(ctx, draft);
+  }
+
   // ---------- قراءة الملف ----------
+  // قراءة أي ملف (CSV أو xlsx) إلى صفوف: Promise<{ rows, sheets, sheet, encoding, buffer }>.
+  function readAny(file) {
+    return file.slice(0, 8).arrayBuffer().then(function (head) {
+      var chk = S.checkFile(file.name, file.size, new Uint8Array(head));
+      if (!chk.ok) throw new Error(chk.message);
+      return file.arrayBuffer().then(function (buf) {
+        if (chk.kind === 'xlsx') return X.readXlsx(buf).then(function (o) { return { rows: o.rows, sheets: o.sheets, sheet: o.sheet, encoding: '', buffer: buf }; });
+        var dec = S.decodeBytes(buf);
+        return { rows: S.parseCSV(dec.text), encoding: dec.encoding };
+      });
+    });
+  }
+
+  // ملف العام الماضي لخانة: يُقرأ بالطريقة نفسها ويُحسب وحده، ثم يُقارن.
+  function loadLastFile(ctx, slot, file) {
+    if (!file) return;
+    readAny(file).then(function (res) {
+      var t = S.toTable(res.rows);
+      if (!t.ok) throw new Error(t.message);
+      t.fileName = file.name;
+      session.lastTables[slot] = t;
+      session.lastInfo[slot] = { fileName: file.name, encoding: res.encoding, sheet: res.sheet || '', error: '' };
+      var draft = draftFor(ctx.data);
+      E.autoSelect(draft, Object.assign({}, session.lastTables, session.tables));
+      autoRun(ctx, draft);
+      ctx.toast('قُرئ ملف العام الماضي «' + file.name + '»: ' + rowsPhrase(t.records.length) + '، وقُورن بهذا العام.', 'success');
+      ctx.rerender();
+    }).catch(function (err) {
+      delete session.lastTables[slot];
+      session.lastInfo[slot] = { fileName: file.name, error: err.message || String(err) };
+      ctx.toast('لم يُقرأ «' + file.name + '»: ' + (err.message || err), 'error');
+      ctx.rerender();
+    });
+  }
+
   function loadFile(ctx, slot, file) {
     if (!file) return;
     var started = Date.now();
     session.busy[slot] = true;
-    file.slice(0, 8).arrayBuffer().then(function (head) {
-      var chk = S.checkFile(file.name, file.size, new Uint8Array(head));
-      if (!chk.ok) throw new Error(chk.message);
-      return file.arrayBuffer().then(function (buf) {
-        if (chk.kind === 'xlsx') {
-          session.buffers[slot] = buf;
-          return X.readXlsx(buf).then(function (o) { return { rows: o.rows, sheets: o.sheets, sheet: o.sheet, encoding: '' }; });
-        }
-        var dec = S.decodeBytes(buf);
-        return { rows: S.parseCSV(dec.text), encoding: dec.encoding };
-      });
-    }).then(function (res) {
+    readAny(file).then(function (res) {
+      if (res.buffer) session.buffers[slot] = res.buffer;
       var t = S.toTable(res.rows);
       if (!t.ok) throw new Error(t.message);
       t.fileName = file.name;
@@ -77,7 +161,9 @@
       session.tables[slot] = t;
       session.info[slot] = { fileName: file.name, size: file.size, encoding: res.encoding, sheets: res.sheets || null, sheet: res.sheet || '', ms: Date.now() - started, error: '' };
       session.busy[slot] = false;
-      ctx.toast('قُرئ «' + file.name + '»: ' + rowsPhrase(t.records.length) + ' (' + ((Date.now() - started) / 1000).toFixed(1) + ' ث).', 'success');
+      var picked = E.autoSelect(draftFor(ctx.data), session.tables);
+      autoRun(ctx, draftFor(ctx.data));
+      ctx.toast('قُرئ «' + file.name + '»: ' + rowsPhrase(t.records.length) + ' (' + ((Date.now() - started) / 1000).toFixed(1) + ' ث)' + (picked.length ? '، واختيرت البنود والرتب تلقائيًا' : '') + '، وحُدّثت النتائج.', 'success');
       ctx.rerender();
     }).catch(function (err) {
       session.busy[slot] = false;
@@ -94,6 +180,8 @@
     if (!t.ok) { ctx.toast(t.message, 'error'); return; }
     t.fileName = session.tables[slot].fileName;
     session.tables[slot] = t;
+    E.autoSelect(draftFor(ctx.data), session.tables);
+    autoRun(ctx, draftFor(ctx.data));
     ctx.rerender();
   }
 
@@ -105,6 +193,8 @@
       session.raw[slot] = o.rows;
       session.tables[slot] = t;
       session.info[slot].sheet = o.sheet;
+      E.autoSelect(draftFor(ctx.data), session.tables);
+      autoRun(ctx, draftFor(ctx.data));
       ctx.rerender();
     }).catch(function (err) { ctx.toast(err.message, 'error'); });
   }
@@ -123,23 +213,24 @@
 
   // ---------- المصادر ----------
   function slotCard(ctx, slot, draft) {
-    var def = E.SLOTS[slot];
+    var sid = slot.replace(/[^A-Za-z0-9_-]/g, '_'); // معرّف صالح لمحددات CSS (ind:AR-EDU-3 ← ind_AR-EDU-3)
+    var def = slotDef(ctx, slot);
     var t = session.tables[slot];
     var info = session.info[slot] || {};
     var saved = savedCycle(ctx.data);
     var prev = saved ? (saved.sources || []).filter(function (s) { return s.slot === slot; })[0] : null;
-    var input = h('input', { type: 'file', id: 'file-' + slot, class: 'visually-hidden', accept: '.csv,.txt,.xlsx,.xls',
+    var input = h('input', { type: 'file', id: 'file-' + sid, class: 'visually-hidden', accept: '.csv,.txt,.xlsx,.xls',
       onchange: function () { loadFile(ctx, slot, input.files && input.files[0]); } });
     var body = [];
     if (t) {
       body.push(h('p', { class: 'slot__status' }, B.dom.badge('مرفوع', 'success'), ' ', h('strong', null, info.fileName), ' · ', rowsPhrase(t.records.length),
-        ' · سطر العناوين ', B.dom.ltr(String(t.headerRow)), info.encoding ? ' · ' + info.encoding : '', info.sheet ? ' · الورقة: ' + info.sheet : ''));
+        ' · سطر العناوين ', B.dom.ltr(String(t.headerRow)), ' · ' + t.columns.length + ' أعمدة', t.emptyColumns ? ' (استُبعد ' + t.emptyColumns + ' فارغ)' : '', info.encoding ? ' · ' + info.encoding : '', info.sheet ? ' · الورقة: ' + info.sheet : ''));
       body.push(h('p', { class: 'muted small slot__cols' }, 'الأعمدة: ', t.columns.slice(0, 10).join('، '), t.columns.length > 10 ? '… (' + t.columns.length + ')' : ''));
-      var hdr = h('input', { type: 'number', min: '1', max: String(session.raw[slot].length), value: String(t.headerRow), class: 'input input--narrow', id: 'hdr-' + slot });
+      var hdr = h('input', { type: 'number', min: '1', max: String(session.raw[slot].length), value: String(t.headerRow), class: 'input input--narrow', id: 'hdr-' + sid });
       body.push(h('div', { class: 'inline-form' },
-        U.field({ id: 'hdr-' + slot, name: 'header', label: 'سطر العناوين', control: hdr }),
+        U.field({ id: 'hdr-' + sid, name: 'header', label: 'سطر العناوين', control: hdr }),
         h('button', { type: 'button', class: 'btn btn--secondary btn--small', onclick: function () { setHeader(ctx, slot, Number(hdr.value)); } }, 'تطبيق'),
-        info.sheets && info.sheets.length > 1 ? U.field({ id: 'sheet-' + slot, name: 'sheet', label: 'الورقة', control: (function () {
+        info.sheets && info.sheets.length > 1 ? U.field({ id: 'sheet-' + sid, name: 'sheet', label: 'الورقة', control: (function () {
           var s = U.selectControl('sheet', info.sheets.map(function (n) { return { value: n, label: n }; }), info.sheet);
           s.addEventListener('change', function () { setSheet(ctx, slot, s.value); });
           return s;
@@ -147,24 +238,77 @@
       var q = qualityFor(slot, t, draft);
       body.push(q.length ? h('ul', { class: 'compact-list quality' }, q.map(function (x) { return h('li', null, B.dom.badge('جودة', 'warning'), ' ', x); }))
         : h('p', { class: 'muted small' }, B.dom.icon('check'), ' لا ملاحظات جودة.'));
+      body.push(fileAnalysis(def, t));
     } else if (info.error) {
       body.push(h('p', { class: 'banner banner--danger', role: 'alert' }, info.error));
     } else {
       body.push(h('p', { class: 'muted small' }, session.busy[slot] ? 'جارٍ القراءة…' : 'لم يُرفع ملف.',
         prev ? ' آخر ملف استُخدم: «' + prev.fileName + '» (' + rowsPhrase(prev.rowCount) + '). يلزم رفعه من جديد للحساب، لأن الملفات لا تُخزن.' : ''));
     }
-    return h('section', { class: 'slot card', 'data-slot': slot, 'aria-labelledby': 'slot-title-' + slot },
+    return h('section', { class: 'slot card', 'data-slot': slot, 'aria-labelledby': 'slot-title-' + sid },
       h('div', { class: 'slot__head' },
-        h('h3', { class: 'slot__title', id: 'slot-title-' + slot }, def.label),
+        h('h3', { class: 'slot__title', id: 'slot-title-' + sid }, def.label),
         B.dom.badge(def.kind === 'aggregate' ? 'جدول تجميعي' : 'قائمة', 'neutral')),
       def.hint ? h('p', { class: 'muted small' }, def.hint) : null,
       body,
+      lastYearBlock(ctx, slot, sid),
       h('div', { class: 'form-actions' },
-        h('label', { class: 'btn btn--secondary btn--small', for: 'file-' + slot }, B.dom.icon('plus'), t ? 'استبدال الملف' : 'رفع ملف (CSV أو xlsx)'),
+        h('label', { class: 'btn btn--secondary btn--small', for: 'file-' + sid }, B.dom.icon('plus'), t ? 'استبدال الملف' : 'رفع ملف (CSV أو xlsx)'),
         input,
         t ? h('button', { type: 'button', class: 'btn btn--ghost btn--small', onclick: function () {
-          delete session.tables[slot]; delete session.raw[slot]; delete session.buffers[slot]; delete session.info[slot]; ctx.rerender();
+          delete session.tables[slot]; delete session.raw[slot]; delete session.buffers[slot]; delete session.info[slot];
+          autoRun(ctx, draft);
+          ctx.rerender();
         } }, 'إزالة') : null));
+  }
+
+  /*
+   * تحليل فوري للملف بعد رفعه، قبل أي اختيار: بنود الجدول التجميعي وقيمها، أو توزيع القيم الفئوية
+   * والأرقام في القائمة. الأعمدة الشخصية (الأسماء والمعرّفات والتواصل) لا تُعرض قيمها.
+   */
+  function fileAnalysis(def, t) {
+    var body;
+    if (def.kind === 'aggregate') {
+      var vc = t.columns.length > 1 ? 1 : 0;
+      body = h('div', null,
+        h('p', { class: 'muted small' }, 'البنود (العمود الأول) وقيمها في العمود «' + t.columns[vc] + '»:'),
+        h('ul', { class: 'compact-list analysis-list' }, t.records.slice(0, 30).map(function (r) {
+          return h('li', null, String(r[0]), ': ', B.dom.ltr(String(r[vc] || '—'), 'strong'));
+        })),
+        t.records.length > 30 ? h('p', { class: 'muted small' }, '… و' + (t.records.length - 30) + ' بندًا آخر') : null);
+    } else {
+      var p = S.profile(t);
+      var cat = p.columns.filter(function (c) { return c.kind === 'categorical'; }).slice(0, 4);
+      var num = p.columns.filter(function (c) { return c.kind === 'numeric'; }).slice(0, 4);
+      var hidden = p.columns.filter(function (c) { return c.kind === 'personal'; }).map(function (c) { return c.name; });
+      body = h('div', { class: 'stack' },
+        cat.length ? h('div', null, cat.map(function (c) {
+          return h('p', { class: 'small analysis-cat' }, h('strong', null, c.name + ': '), c.values.map(function (v) { return v.value + ' (' + v.count + ')'; }).join('، '));
+        })) : null,
+        num.length ? h('p', { class: 'small' }, num.map(function (c) { return c.name + ': من ' + c.min + ' إلى ' + c.max; }).join(' · ')) : null,
+        hidden.length ? h('p', { class: 'muted small' }, B.dom.icon('shield'), ' أعمدة شخصية لا تُعرض قيمها: ' + hidden.join('، ')) : null);
+    }
+    return h('details', { class: 'details-toggle file-analysis', open: true }, h('summary', null, 'تحليل الملف'), body);
+  }
+
+  // ملف العام الماضي (اختياري): يُرفع وحده ويُحسب وحده، وتُقارن قيمته بهذا العام.
+  function lastYearBlock(ctx, slot, sid) {
+    var lt = session.lastTables[slot];
+    var li = session.lastInfo[slot] || {};
+    var input = h('input', { type: 'file', id: 'last-' + sid, class: 'visually-hidden', accept: '.csv,.txt,.xlsx,.xls',
+      onchange: function () { loadLastFile(ctx, slot, input.files && input.files[0]); } });
+    return h('div', { class: 'slot__last', 'data-last': slot },
+      h('p', { class: 'small strong' }, 'ملف العام الماضي (اختياري، للمقارنة)'),
+      lt ? h('p', { class: 'small slot__last-status' }, B.dom.badge('العام الماضي', 'neutral'), ' ', h('strong', null, li.fileName), ' · ', rowsPhrase(lt.records.length), ' · سطر العناوين ', B.dom.ltr(String(lt.headerRow)))
+        : li.error ? h('p', { class: 'banner banner--danger', role: 'alert' }, li.error)
+        : h('p', { class: 'muted small' }, 'لم يُرفع. يُرفع وحده، ويُحسب وحده ولو اختلف عدد صفوفه.'),
+      h('div', { class: 'form-actions' },
+        h('label', { class: 'btn btn--ghost btn--small', for: 'last-' + sid }, B.dom.icon('plus'), lt ? 'استبدال ملف العام الماضي' : 'رفع ملف العام الماضي'),
+        input,
+        lt ? h('button', { type: 'button', class: 'btn btn--ghost btn--small', onclick: function () {
+          delete session.lastTables[slot]; delete session.lastInfo[slot];
+          autoRun(ctx, draftFor(ctx.data)); ctx.rerender();
+        } }, 'إزالة ملف العام الماضي') : null));
   }
 
   // ---------- إعداد الوصفة ----------
@@ -190,34 +334,38 @@
 
   function inputEditor(ctx, inp, draft) {
     var t = inp.slot ? session.tables[inp.slot] : null;
-    var head = h('p', { class: 'strong' }, inp.label, inp.slot ? h('span', { class: 'muted small' }, ' · من ' + E.SLOTS[inp.slot].label) : null);
+    var head = h('p', { class: 'strong' }, inp.label, inp.slot ? h('span', { class: 'muted small' }, ' · من ' + slotDef(ctx, inp.slot).label) : null,
+      inp.args.auto ? [' ', B.dom.badge('اختيار تلقائي، يمكن تعديله', 'info')] : null);
     if (inp.op === 'manual') {
       var v = h('input', { type: 'text', class: 'input input--narrow', value: inp.args.value || '', inputmode: 'decimal', dir: 'ltr' });
       var r = h('input', { type: 'text', class: 'input', value: inp.args.reason || '', dir: 'auto' });
       v.addEventListener('input', function () { inp.args.value = v.value; });
       r.addEventListener('input', function () { inp.args.reason = r.value; });
+      v.addEventListener('change', function () { changed(ctx, draft); });
+      r.addEventListener('change', function () { changed(ctx, draft); });
       return h('div', { class: 'recipe-input', 'data-input': inp.key }, head,
         h('div', { class: 'form-grid' },
           U.field({ id: 'manual-' + inp.key, name: 'value', label: 'القيمة (اختيارية)', hint: 'إذا تُركت فارغة يُحسب FTE من المتفرغين فقط مع تنبيه.', control: v }),
           U.field({ id: 'reason-' + inp.key, name: 'reason', label: 'السبب أو المصدر', hint: 'مطلوب إذا أُدخلت قيمة.', control: r })));
     }
-    if (!t) return h('div', { class: 'recipe-input', 'data-input': inp.key }, head, h('p', { class: 'muted small' }, 'يرجى رفع ملف «' + E.SLOTS[inp.slot].label + '» أولًا.'));
+    if (!t) return h('div', { class: 'recipe-input', 'data-input': inp.key }, head, h('p', { class: 'muted small' }, 'يرجى رفع ملف «' + slotDef(ctx, inp.slot).label + '» أولًا.'));
     var parts = [head];
     if (inp.op === 'pick') {
       var items = t.records.map(function (rec) { return String(rec[0]).trim(); }).filter(Boolean);
-      parts.push(U.field({ id: 'col-' + inp.key, name: 'column', label: 'عمود القيمة', control: columnSelect('col-' + inp.key, t, inp.args.column === 'B' ? t.columns[1] : inp.args.column, function (val) { inp.args.column = val; }) }));
+      parts.push(U.field({ id: 'col-' + inp.key, name: 'column', label: 'عمود القيمة', control: columnSelect('col-' + inp.key, t, inp.args.column === 'B' ? t.columns[1] : inp.args.column, function (val) { inp.args.column = val; inp.args.auto = false; changed(ctx, draft); }) }));
       parts.push(h('p', { class: 'field__label' }, 'البنود المختارة (تُجمع)'));
-      parts.push(checksList('items-' + inp.key, items.map(function (x) { return { value: x, label: x }; }), inp.args.items, function (list) { inp.args.items = list; }));
+      parts.push(checksList('items-' + inp.key, items.map(function (x) { return { value: x, label: x }; }), inp.args.items, function (list) { inp.args.items = list; inp.args.auto = false; changed(ctx, draft); }));
     } else if (inp.op === 'countWhere') {
       parts.push(U.field({ id: 'col-' + inp.key, name: 'column', label: 'العمود', control: columnSelect('col-' + inp.key, t, inp.args.column, function (val) {
         inp.args.column = val;
-        if (inp.args.mode === 'in') { inp.args.values = []; ctx.rerender(); }
+        inp.args.auto = false;
+        if (inp.args.mode === 'in') { inp.args.values = []; autoRun(ctx, draft); ctx.rerender(); } else changed(ctx, draft);
       }) }));
       if (inp.args.mode === 'in') {
         var dv = inp.args.column ? S.distinctValues(t, inp.args.column) : null;
         if (dv) {
           parts.push(h('p', { class: 'field__label' }, 'القيم التي تُعد (تُعرض للاختيار ولا يُخزن إلا المختار)'));
-          parts.push(checksList('values-' + inp.key, dv.map(function (x) { return { value: x.value, label: x.value + ' (' + x.count + ')' }; }), inp.args.values, function (list) { inp.args.values = list; }));
+          parts.push(checksList('values-' + inp.key, dv.map(function (x) { return { value: x.value, label: x.value + ' (' + x.count + ')' }; }), inp.args.values, function (list) { inp.args.values = list; inp.args.auto = false; changed(ctx, draft); }));
         }
       } else if (inp.args.mode === 'gte') {
         parts.push(h('p', { class: 'muted small' }, 'تُعد الصفوف التي قيمتها ≥ عتبة هيرش في معاملات الدورة (' + draft.params.hIndexThreshold + ').'));
@@ -228,13 +376,16 @@
     return h('div', { class: 'recipe-input', 'data-input': inp.key }, parts);
   }
 
+  // عمود الروابط لكل ملف مؤشر مرفوع (يُكتشف تلقائيًا، ويُصحح هنا عند الحاجة فقط).
   function linkCheckEditor(ctx, draft) {
-    var rc = draft.recipes.filter(function (r) { return r.linkCheck; })[0];
-    var t = session.tables[rc.linkCheck.slot];
-    if (!t) return null;
-    return h('div', { class: 'recipe-input', 'data-input': 'linkCheck' },
-      h('p', { class: 'strong' }, 'فحص نطاق الروابط في نموذج المؤشر 8 (النطاق المتوقع ' + rc.linkCheck.domain + ')'),
-      U.field({ id: 'col-linkCheck', name: 'column', label: 'عمود الرابط', control: columnSelect('col-linkCheck', t, rc.linkCheck.column, function (val) { rc.linkCheck.column = val; }) }));
+    return draft.recipes.filter(function (r) { return r.linkCheck && session.tables[r.linkCheck.slot]; }).map(function (rc) {
+      var t = session.tables[rc.linkCheck.slot];
+      var id = 'col-link-' + rc.indicatorCode;
+      return h('div', { class: 'recipe-input', 'data-input': 'linkCheck-' + rc.indicatorCode },
+        h('p', { class: 'strong' }, 'عمود الروابط في ملف ' + rc.indicatorCode + (rc.linkCheck.domain ? ' (النطاق المتوقع ' + rc.linkCheck.domain + ')' : ''),
+          rc.linkCheck.auto ? [' ', B.dom.badge('اختيار تلقائي، يمكن تعديله', 'info')] : null),
+        U.field({ id: id, name: 'column', label: 'العمود', control: columnSelect(id, t, rc.linkCheck.column, function (val) { rc.linkCheck.column = val; rc.linkCheck.auto = false; changed(ctx, draft); }) }));
+    });
   }
 
   // ---------- الحساب ----------
@@ -242,17 +393,14 @@
     var loaded = Object.keys(session.tables);
     if (!loaded.length) { ctx.toast('يرجى رفع ملف واحد على الأقل قبل الحساب.', 'error'); return; }
     var out = E.run(draft, session.tables, ctx.today);
+    // العام الماضي: يُحسب من ملفاته وحدها بالقواعد نفسها، ثم تُقارن القيمتان (عدد الصفوف قد يختلف).
+    if (Object.keys(session.lastTables).length) E.attachLastYear(out, E.run(draft, session.lastTables, ctx.today), draft);
     session.lastRun = out;
-    var meta = loaded.map(function (slot) {
-      var m = S.describe(session.tables[slot], session.info[slot].fileName, ctx.today);
-      m.slot = slot;
-      if (session.info[slot].sheet) m.sheet = session.info[slot].sheet;
-      return m;
-    });
+    var meta = sourcesMeta(ctx, draft);
     draft.sources = meta;
     var res = A.recordCalcRun(ctx.data, draft, E.storableRun(out), meta, ctx.env());
     if (!res.ok) { ctx.toast(res.message, 'error'); return; }
-    ctx.save('حُسبت المؤشرات: ' + res.info.withValue + ' من ' + out.results.length + ' بنتيجة.');
+    ctx.save('حُسبت المؤشرات وحُفظت في سجل التشغيلات: ' + res.info.withValue + ' من ' + out.results.length + ' بنتيجة.');
     ctx.rerender();
     var t = document.getElementById('results-title');
     if (t) t.scrollIntoView({ block: 'start' });
@@ -262,7 +410,7 @@
   function viewResults(ctx) {
     if (session.lastRun) return { live: true, at: session.lastRun.at, results: session.lastRun.results };
     var saved = savedCycle(ctx.data);
-    var last = saved && saved.runs && saved.runs[0];
+    var last = saved && (saved.latest || (saved.runs && saved.runs[0]));
     if (!last) return null;
     return { live: false, at: last.at, results: last.results.map(function (r) {
       return Object.assign({}, r, { warnings: (r.warnings || []).map(function (w) { return typeof w === 'string' ? { text: w } : w; }) });
@@ -276,18 +424,7 @@
   function approve(ctx, r, draft) {
     var ind = indicatorByCode(ctx, r.indicatorCode);
     if (!ind) { ctx.toast('المؤشر ' + r.indicatorCode + ' غير موجود في البيانات.', 'error'); return; }
-    var source = E.sourceText(Object.assign({ formula: r.formula || (draft.recipes.filter(function (x) { return x.indicatorCode === r.indicatorCode; })[0] || {}).formula }, r), draft, ctx.today);
-    ctx.confirm({
-      title: 'اعتماد القيمة المحسوبة؟',
-      body: 'ستصبح القيمة الحالية للمؤشر ' + ind.code + ' «' + r.value + '»' + (ind.currentValue ? ' بدل «' + ind.currentValue + '»' : '') + '، ويُكتب مصدرها: «' + source + '». لا تتغير حالة العمل.',
-      confirmLabel: 'اعتماد القيمة'
-    }).then(function (ok) {
-      if (!ok) return;
-      var res = A.approveCalculatedValue(ctx.data, ind.id, { value: r.value, source: source }, ctx.env());
-      if (!res.ok) { ctx.toast(res.message, 'error'); return; }
-      ctx.save('اعتُمدت القيمة ' + r.value + ' للمؤشر ' + ind.code + '.');
-      ctx.rerender();
-    });
+    U.approveCalculated(ctx, ind, r.value, E.sourceText(r, draft, ctx.today));
   }
 
   function makeRequirement(ctx, w, r) {
@@ -319,10 +456,10 @@
       var ind = indicatorByCode(ctx, r.indicatorCode);
       var cmp = E.compare(r, ind);
       return [r.indicatorCode, ind ? ind.name : '', r.value === null ? '' : r.value, cmp.progressFileValue, cmp.conflict ? 'نعم' : 'لا', cmp.lastYearValue, cmp.yoy.label,
-        r.warnings.map(function (w) { return w.text; }).join('؛ '), (r.audit || []).join('؛ '), r.error || ''];
+        r.warnings.map(function (w) { return w.text; }).join('؛ '), (r.audit || []).join('؛ '), r.error || '', (r.changes || []).join('؛ ')];
     });
     var name = 'basira-calculation-' + ctx.today + '.csv';
-    ctx.download(name, B.csv.toCSV(['رمز المؤشر', 'المؤشر', 'القيمة المحسوبة', 'ملف التقدم', 'تعارض', 'العام الماضي', 'التقدم', 'التنبيهات', 'بيان الحساب', 'الخطأ'], rows), 'text/csv;charset=utf-8');
+    ctx.download(name, B.csv.toCSV(['رمز المؤشر', 'المؤشر', 'القيمة المحسوبة', 'ملف التقدم', 'تعارض', 'العام الماضي', 'التقدم', 'التنبيهات', 'بيان الحساب', 'الخطأ', 'ما تغيّر عن العام الماضي'], rows), 'text/csv;charset=utf-8');
     ctx.toast('نُزّل الملف: ' + name, 'success');
   }
 
@@ -341,7 +478,8 @@
         var cmp = E.compare(r, indicatorByCode(ctx, r.indicatorCode));
         return h('span', { class: 'stack-xs compare' },
           h('span', { class: 'small' }, 'ملف التقدم: ', B.dom.ltr(cmp.progressFileValue || '—'), cmp.conflict ? [' ', B.dom.badge('تعارض', 'danger')] : null),
-          h('span', { class: 'small' }, 'العام الماضي: ', B.dom.ltr(cmp.lastYearValue || '—')),
+          h('span', { class: 'small' }, 'العام الماضي: ', B.dom.ltr(cmp.lastYearValue || '—'), cmp.lastYearSource === 'file' ? ' (من ملفه)' : cmp.lastYearSource === 'manual' ? ' (مكتوبة في المؤشر)' : '',
+            r.lastYearError ? h('span', { class: 'muted' }, ' · لم يُحسب من ملفه: ' + r.lastYearError) : null),
           h('span', { class: 'small yoy' }, cmp.yoy.label),
           h('span', { class: 'muted small' }, E.DIRECTIONS[r.direction] || ''));
       } },
@@ -351,6 +489,8 @@
             return h('li', null, B.dom.badge('تنبيه', 'warning'), ' ', w.text,
               vr.live && w.suggest ? h('button', { type: 'button', class: 'link-button small make-req', onclick: function () { makeRequirement(ctx, w, r); } }, ' أنشئ متطلبًا') : null);
           })) : null,
+          (r.changes || []).length ? h('details', { class: 'details-toggle changes', open: true }, h('summary', null, 'ما تغيّر عن العام الماضي'),
+            h('ul', { class: 'compact-list' }, r.changes.map(function (c) { return h('li', null, c); }))) : null,
           (r.audit || []).length ? h('details', { class: 'details-toggle audit' }, h('summary', null, 'بيان الحساب'),
             h('ul', { class: 'compact-list' }, r.audit.map(function (a) { return h('li', null, a); }))) : null);
       } },
@@ -362,11 +502,45 @@
       } }
     ], vr.results, function (r) { return r.indicatorCode; });
     return U.card('النتائج', h('div', { class: 'stack' },
-      h('p', { class: 'muted small', id: 'results-meta' }, vr.live ? 'نتائج حساب هذه الجلسة.' : 'نتائج آخر تشغيل محفوظ (' + B.format.formatDate(vr.at) + '). لإعادة الحساب يلزم رفع الملفات من جديد.'),
+      h('p', { class: 'muted small', id: 'results-meta' }, vr.live ? 'تُحسب تلقائيًا بعد كل رفع أو اختيار.' : 'نتائج آخر حساب محفوظ (' + B.format.formatDate(vr.at) + '). لإعادة الحساب يلزم رفع الملفات من جديد.'),
+      h('p', { class: 'banner banner--info no-print', id: 'results-links' }, B.dom.icon('pulse'), h('span', null, 'تظهر هذه النتائج أيضًا في ', h('a', { href: '#/insights' }, 'التحليل التشغيلي'), ' و', h('a', { href: '#/dashboard' }, 'لوحة القيادة'), ' وصفحة كل مؤشر. ويُغيّر «اعتماد القيمة» القيمة الحالية للمؤشر.')),
       table,
       h('div', { class: 'form-actions no-print' },
         h('button', { type: 'button', class: 'btn btn--secondary', id: 'calc-export', onclick: function () { exportCsv(ctx, vr); } }, B.dom.icon('download'), 'تصدير تقرير الحساب CSV'),
         h('button', { type: 'button', class: 'btn btn--ghost', onclick: function () { root.print(); } }, B.dom.icon('printer'), 'طباعة'))), { id: 'results-title' });
+  }
+
+  // خانة ملف لكل مؤشر مفعّل غير المؤشرات الخاصة، مجمعة بالتصنيف (المؤشر الجديد يظهر هنا تلقائيًا).
+  function indicatorSlots(ctx, draft) {
+    var slots = draft.inputs.filter(function (i) { return i.op === 'countRows'; }).map(function (i) { return i.slot; });
+    var groups = {};
+    slots.forEach(function (s) {
+      var ind = ctx.data.indicators.filter(function (i) { return i.code === s.slice(4); })[0];
+      var rk = ind ? ind.ranking : '';
+      (groups[rk] = groups[rk] || []).push(s);
+    });
+    return Object.keys(groups).map(function (rk) {
+      return h('div', null,
+        h('h2', { class: 'section-title' }, 'ملفات مؤشرات ' + U.rankingName(rk) + ': تُعدّ صفوفها تلقائيًا'),
+        h('div', { class: 'slot-grid' }, groups[rk].map(function (s) { return slotCard(ctx, s, draft); })));
+    });
+  }
+
+  // التصحيح اليدوي مطوي افتراضيًا: لا يلزم في العادة، ويبقى مفتوحًا إذا فتحته المستخدمة.
+  function manualFix(ctx, draft, inputs) {
+    var d = h('details', { class: 'card manual-fix', id: 'manual-fix', open: session.manualOpen || null },
+      h('summary', { class: 'card__title' }, 'تصحيح يدوي (عند الحاجة فقط)'),
+      h('div', { class: 'stack' },
+        h('p', { class: 'muted small' }, 'الاختيارات هنا تُملأ تلقائيًا عند الرفع وعليها شارة «اختيار تلقائي». غيّريها فقط إذا أخطأت القاعدة، ويُحفظ تعديلك للمرات القادمة.'),
+        inputs.filter(function (inp) { return inp.op !== 'countRows'; }).map(function (inp) { return inputEditor(ctx, inp, draft); }),
+        linkCheckEditor(ctx, draft),
+        h('details', { class: 'details-toggle' }, h('summary', null, 'الصيغ المستخدمة'),
+          h('ul', { class: 'compact-list' }, draft.recipes.map(function (r) {
+            return h('li', null, B.dom.ltr(r.indicatorCode, 'strong'), ': ', E.explainFormula(r.formula, draft.inputs), ' · ', E.DIRECTIONS[r.direction],
+              h('br'), h('code', { class: 'formula', dir: 'ltr' }, r.formula));
+          })))));
+    d.addEventListener('toggle', function () { session.manualOpen = d.open; });
+    return d;
   }
 
   // ---------- الصفحة ----------
@@ -377,6 +551,7 @@
       var n = Number(th.value);
       if (!(n > 0)) { ctx.toast('عتبة هيرش يجب أن تكون رقمًا أكبر من صفر.', 'error'); th.value = String(draft.params.hIndexThreshold); return; }
       draft.params.hIndexThreshold = n;
+      changed(ctx, draft);
     });
     var inputsBySlot = draft.inputs;
     var loadedCount = Object.keys(session.tables).length;
@@ -387,23 +562,20 @@
         h('span', null, h('strong', null, 'الخصوصية: '), 'الملفات تُقرأ في هذا المتصفح فقط ولا تُخزن ولا تُرسل، وتختفي بإعادة تحميل الصفحة. يُحفظ فقط اسم الملف وعدد صفوفه وأعمدته والنتائج المجمعة. الحساب بقواعد مكتوبة، لا ذكاء اصطناعي.')),
       U.card('معاملات الدورة', h('div', { class: 'inline-form' },
         U.field({ id: 'param-h', name: 'hIndexThreshold', label: 'عتبة معامل هيرش (المؤشر 5)', hint: 'منصة 2026 تذكر 10، وFAQ 2025 يذكر 20.', control: th }))),
-      h('h2', { class: 'section-title' }, 'ملفات المصدر (' + loadedCount + ' في الذاكرة)'),
-      h('div', { class: 'slot-grid' }, MAIN_SLOTS.map(function (s) { return slotCard(ctx, s, draft); })),
+      h('p', { class: 'banner banner--info', id: 'auto-rule' }, B.dom.icon('check'), h('span', null,
+        h('strong', null, 'يكفي رفع الملف: '), 'تُقرأ كل الصفوف والأعمدة التي فيها بيانات وتُستبعد الفارغة، ويُكتشف سطر العناوين. ',
+        'ملف كل مؤشر تُعدّ صفوفه تلقائيًا (والمكرر تمامًا لا يُعد مرتين). وفي المؤشرات 1 و2 و5 تُختار بنود الطلبة والرتب الأكاديمية تلقائيًا بقاعدة مكتوبة. ',
+        'لا يلزم أي اختيار، والتصحيح اليدوي في آخر الصفحة للحاجة فقط.')),
+      h('h2', { class: 'section-title' }, 'ملفات المؤشرات 1 و2 و5 (العمادات والمحاضرون وSciVal) · ' + loadedCount + ' ملفات في الذاكرة'),
+      h('div', { class: 'slot-grid' }, SPECIAL_SLOTS.map(function (s) { return slotCard(ctx, s, draft); })),
+      indicatorSlots(ctx, draft),
       h('details', { class: 'details-toggle' }, h('summary', null, 'مصادر اختيارية: ملف HEQS وملف ربط المفاتيح'),
         h('div', { class: 'slot-grid' }, OPTIONAL_SLOTS.map(function (s) { return slotCard(ctx, s, draft); }))),
-      U.card('إعداد الوصفة', h('div', { class: 'stack' },
-        h('p', { class: 'muted small' }, 'تُختار البنود والقيم من الملف المرفوع، وتُحفظ مع الحساب للدورات التالية.'),
-        inputsBySlot.map(function (inp) { return inputEditor(ctx, inp, draft); }),
-        linkCheckEditor(ctx, draft),
-        h('details', { class: 'details-toggle' }, h('summary', null, 'الصيغ المستخدمة'),
-          h('ul', { class: 'compact-list' }, draft.recipes.map(function (r) {
-            return h('li', null, B.dom.ltr(r.indicatorCode, 'strong'), ': ', E.explainFormula(r.formula, draft.inputs), ' · ', E.DIRECTIONS[r.direction],
-              h('br'), h('code', { class: 'formula', dir: 'ltr' }, r.formula));
-          })))), { id: 'recipe-title' }),
+      manualFix(ctx, draft, inputsBySlot),
       h('div', { class: 'form-actions no-print' }, h('button', { type: 'button', class: 'btn btn--primary', onclick: function () { compute(ctx, draft); } }, 'احسب')),
-      resultsCard(ctx, draft));
+      h('div', { id: 'calc-results-wrap' }, resultsCard(ctx, draft)));
   };
 
   // للفحص فقط: إفراغ ذاكرة الصفحة (يعادل إعادة التحميل).
-  B.views.calculate.resetSession = function () { session = { tables: {}, raw: {}, buffers: {}, info: {}, draft: null, lastRun: null, busy: {} }; };
+  B.views.calculate.resetSession = function () { session = { tables: {}, raw: {}, buffers: {}, info: {}, lastTables: {}, lastInfo: {}, draft: null, lastRun: null, busy: {} }; };
 })(window);

@@ -100,6 +100,23 @@
       })));
   }
 
+  // ملخص ملفات المصدر والحساب منها (أحدث نتيجة محفوظة).
+  function sourcesCard(ctx) {
+    var fd = B.engine.findings(ctx.data);
+    if (!fd) {
+      return h('section', { class: 'card sources-card', 'aria-labelledby': 'dash-sources-title' },
+        h('h2', { id: 'dash-sources-title', class: 'card__title' }, B.dom.icon('database'), 'ملفات المصدر'),
+        h('p', { class: 'muted small' }, 'لم تُرفع ملفات بعد. ', h('a', { href: '#/calculate' }, 'رفع ملفات العمادات وحساب المؤشرات منها')));
+    }
+    var c = fd.counts;
+    return h('section', { class: 'card sources-card', 'aria-labelledby': 'dash-sources-title' },
+      h('h2', { id: 'dash-sources-title', class: 'card__title' }, B.dom.icon('database'), 'ملفات المصدر'),
+      h('p', { class: 'small', id: 'dash-sources-summary' }, fd.sources.length + ' ملفات · حُسب ' + c.computed + ' من ' + U.countIndicators(c.total) + ' · ',
+        c.pending ? B.dom.badge('بانتظار الاعتماد ' + c.pending, 'warning') : B.dom.badge('لا قيم بانتظار الاعتماد', 'success'), ' ',
+        c.conflicts ? B.dom.badge('تعارض ' + c.conflicts, 'danger') : null, c.quality ? [' ', B.dom.badge('ملاحظات جودة ' + c.quality, 'warning')] : null),
+      h('a', { href: '#/calculate', class: 'more-link' }, 'مصادر البيانات والحساب', B.dom.icon('chevron')));
+  }
+
   B.views.dashboard = function (ctx) {
     var d = ctx.data;
     var open = d.requirements.filter(D.isOpen);
@@ -132,6 +149,7 @@
           attentionList(ctx),
           h('a', { href: '#/requirements', class: 'more-link' }, 'عرض كل المتطلبات', B.dom.icon('chevron'))), { id: 'attention-title' }),
         h('div', { class: 'stack' },
+          sourcesCard(ctx),
           U.card('تعارضات القيم', conflictsList(ctx), { id: 'conflicts-title' }),
           U.card('أسئلة تنتظر قرارًا', questionsList(ctx), { id: 'questions-title' }),
           U.card('حسب الجهة', byEntity(ctx), { id: 'entities-title' }))));

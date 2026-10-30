@@ -493,21 +493,41 @@
    * يحفظ تشغيلًا: إعداد الدورة، ووصف الملفات (دون محتواها)، والنتيجة المجمعة (engine.storableRun).
    * يُحتفظ بآخر 10 تشغيلات فقط لكل دورة.
    */
-  function recordCalcRun(data, cycle, storable, sourcesMeta, env) {
-    if (!cycle || !cycle.id || !storable || !Array.isArray(storable.results)) return fail({}, 'بيانات التشغيل غير صالحة.');
+  // يحفظ إعداد الدورة ووصف الملفات وأحدث نتيجة (latest). addRun: يُضاف أيضًا إلى سجل التشغيلات.
+  function storeCalc(data, cycle, storable, sourcesMeta, addRun) {
     if (!data.calc || typeof data.calc !== 'object') data.calc = { cycles: [] };
     if (!Array.isArray(data.calc.cycles)) data.calc.cycles = [];
     var saved = find(data.calc.cycles, cycle.id);
     var copy = JSON.parse(JSON.stringify({ id: cycle.id, ranking: cycle.ranking, label: cycle.label, params: cycle.params, inputs: cycle.inputs, recipes: cycle.recipes }));
     copy.sources = (sourcesMeta || []).map(function (s) {
-      return { slot: s.slot, fileName: s.fileName, uploadedAt: s.uploadedAt || '', rowCount: s.rowCount, headerRow: s.headerRow, columns: (s.columns || []).slice(), sheet: s.sheet || '' };
+      var m = { slot: s.slot, fileName: s.fileName, uploadedAt: s.uploadedAt || '', rowCount: s.rowCount, headerRow: s.headerRow, columns: (s.columns || []).slice(), sheet: s.sheet || '' };
+      if (Array.isArray(s.quality)) m.quality = s.quality.map(String);
+      return m;
     });
+    copy.latest = JSON.parse(JSON.stringify(storable));
     copy.runs = saved && Array.isArray(saved.runs) ? saved.runs.slice() : [];
-    copy.runs.unshift(JSON.parse(JSON.stringify(storable)));
-    if (copy.runs.length > 10) copy.runs.length = 10;
+    if (addRun) {
+      copy.runs.unshift(JSON.parse(JSON.stringify(storable)));
+      if (copy.runs.length > 10) copy.runs.length = 10;
+    }
     if (saved) data.calc.cycles[data.calc.cycles.indexOf(saved)] = copy; else data.calc.cycles.push(copy);
+  }
+
+  /*
+   * الحساب التلقائي بعد كل رفع أو اختيار: يحدّث أحدث نتيجة فقط، فتراها صفحات التحليل ولوحة القيادة والمؤشر.
+   * لا يُضاف إلى سجل التشغيلات ولا إلى سجل الأنشطة، حتى لا يمتلئا بكل نقرة.
+   */
+  function setCalcLatest(data, cycle, storable, sourcesMeta) {
+    if (!cycle || !cycle.id || !storable || !Array.isArray(storable.results)) return fail({}, 'بيانات التشغيل غير صالحة.');
+    storeCalc(data, cycle, storable, sourcesMeta, false);
+    return { ok: true, id: cycle.id };
+  }
+
+  function recordCalcRun(data, cycle, storable, sourcesMeta, env) {
+    if (!cycle || !cycle.id || !storable || !Array.isArray(storable.results)) return fail({}, 'بيانات التشغيل غير صالحة.');
+    storeCalc(data, cycle, storable, sourcesMeta, true);
     var ok = storable.results.filter(function (r) { return r.value !== null && !r.error; }).length;
-    log(data, env, 'calc_run', 'calc', cycle.id, 'شُغّل محرك الحساب (' + cycle.label + '): ' + ok + ' من ' + storable.results.length + ' مؤشرات بنتيجة.');
+    log(data, env, 'calc_run', 'calc', cycle.id, 'شُغّل محرك الحساب (' + cycle.label + '): ' + ok + ' من ' + countWord(storable.results.length, 'مؤشر واحد', 'مؤشرين', 'مؤشرات', 'مؤشرًا') + ' بنتيجة.');
     return { ok: true, id: cycle.id, info: { withValue: ok } };
   }
 
@@ -530,6 +550,19 @@
     ind.currentValue = value;
     ind.valueSource = source;
     log(data, env, 'calc_approve', 'indicator', ind.id, 'اعتُمدت القيمة المحسوبة للمؤشر ' + ind.code + ': ' + value + (old ? ' (كانت ' + old + ')' : '') + '.');
+    return { ok: true, id: ind.id, info: { previous: old } };
+  }
+
+  // قيمة العام الماضي المحسوبة من ملفه تحل محل المكتوبة يدويًا، بعد تأكيد المستخدمة.
+  function approveLastYearValue(data, indicatorId, value, env) {
+    var ind = find(data.indicators, indicatorId);
+    if (!ind) return fail({}, 'المؤشر غير موجود.');
+    var v = clean(value);
+    if (!v) return fail({ value: 'لا توجد قيمة محسوبة للعام الماضي.' });
+    if (v.length > 30) return fail({ value: 'القيمة أطول من 30 حرفًا.' });
+    var old = ind.lastYearValue;
+    ind.lastYearValue = v;
+    log(data, env, 'calc_approve_last', 'indicator', ind.id, 'اعتُمدت قيمة العام الماضي المحسوبة من ملفه للمؤشر ' + ind.code + ': ' + v + (old ? ' (كانت ' + old + ')' : '') + '.');
     return { ok: true, id: ind.id, info: { previous: old } };
   }
 
@@ -573,7 +606,9 @@
     addDecision: addDecision,
     resolveDecision: resolveDecision,
     recordCalcRun: recordCalcRun,
+    setCalcLatest: setCalcLatest,
     approveCalculatedValue: approveCalculatedValue,
+    approveLastYearValue: approveLastYearValue,
     createRequirementFromWarning: createRequirementFromWarning,
     recordLetterSent: recordLetterSent,
     updateLetterTemplate: updateLetterTemplate,

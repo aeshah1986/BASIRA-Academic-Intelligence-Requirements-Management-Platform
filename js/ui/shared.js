@@ -241,6 +241,39 @@
         extra ? [' ', extra] : null));
   }
 
+  /*
+   * «اعتماد القيمة» المحسوبة من الملفات (AC-CALC-10): حوار تأكيد يذكر القيمتين والمصدر، ثم تحديث القيمة
+   * ومصدرها فقط. يُستخدم من صفحة الحساب ومن صفحة المؤشر.
+   */
+  function approveCalculated(ctx, ind, value, source) {
+    ctx.confirm({
+      title: 'اعتماد القيمة المحسوبة؟',
+      body: 'ستصبح القيمة الحالية للمؤشر ' + ind.code + ' «' + value + '»' + (ind.currentValue ? ' بدل «' + ind.currentValue + '»' : '') + '، ويُكتب مصدرها: «' + source + '». لا تتغير حالة العمل.',
+      confirmLabel: 'اعتماد القيمة'
+    }).then(function (ok) {
+      if (!ok) return;
+      var res = B.actions.approveCalculatedValue(ctx.data, ind.id, { value: value, source: source }, ctx.env());
+      if (!res.ok) { ctx.toast(res.message, 'error'); return; }
+      ctx.save('اعتُمدت القيمة ' + value + ' للمؤشر ' + ind.code + '.');
+      ctx.rerender();
+    });
+  }
+
+  // صياغة العدد: مؤشر واحد، مؤشران، 3–10 مؤشرات، 11+ مؤشرًا.
+  function countIndicators(n) {
+    if (n === 1) return 'مؤشر واحد';
+    if (n === 2) return 'مؤشرين';
+    if (n >= 3 && n <= 10) return n + ' مؤشرات';
+    return n + ' مؤشرًا';
+  }
+
+  // شارة حالة نتيجة محسوبة.
+  function calcStatusBadge(status) {
+    if (status === 'approved') return B.dom.badge('معتمدة', 'success');
+    if (status === 'pending') return B.dom.badge('بانتظار الاعتماد', 'warning');
+    return B.dom.badge('لم تُحسب', 'neutral');
+  }
+
   function escalationBadge(level) {
     if (typeof level !== 'number') return null;
     return B.dom.badge('L' + level + ' ' + M.ESCALATION_NAMES[level], level >= 3 ? 'danger' : level === 2 ? 'warning' : 'neutral');
@@ -255,6 +288,9 @@
     barChart: barChart,
     rulesNotice: rulesNotice,
     escalationBadge: escalationBadge,
+    approveCalculated: approveCalculated,
+    calcStatusBadge: calcStatusBadge,
+    countIndicators: countIndicators,
     rankingName: rankingName,
     person: person,
     statusBadge: statusBadge,

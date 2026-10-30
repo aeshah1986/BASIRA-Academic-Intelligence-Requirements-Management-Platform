@@ -24,7 +24,7 @@ function table(file, headerRow) {
 function env() { let n = 0; return { today: T, now: '2026-11-01T09:00:00.000Z', newId: p => p + '-e' + (++n) }; }
 // دورة مضبوطة كما ستضبطها المستخدمة من الواجهة: البنود والرتب المختارة.
 function configured() {
-  const c = E.defaultCycle();
+  const c = E.defaultCycle(createSampleData().indicators);
   const set = (key, args) => Object.assign(c.inputs.find(i => i.key === key).args, args);
   set('admissionStudents', { items: ['طلبة الدبلوم', 'طلبة البكالوريوس'] });
   set('graduateStudents', { items: ['طلبة الدبلوم العالي', 'طلبة الماجستير', 'طلبة الدكتوراه'] });
@@ -216,7 +216,7 @@ test('ENG-15 ملف ناقص: «ينقصه» باسم الخانة، ولا تت
   assert.equal(byCode(out, 'AR-EDU-1').error, 'ينقصه: المحاضرون الفعالون.');
   assert.deepEqual(byCode(out, 'AR-EDU-1').missing, ['المحاضرون الفعالون']);
   assert.equal(byCode(out, 'AR-EDU-5').value, '11');
-  assert.match(byCode(out, 'AR-EDU-3').error, /ينقصه: نموذج المؤشر 3/);
+  assert.match(byCode(out, 'AR-EDU-3').error, /ينقصه: ملف المؤشر AR-EDU-3/);
 });
 
 // ---------- الاعتماد والخصوصية والتخزين ----------
@@ -237,7 +237,7 @@ test('ENG-16 «اعتماد القيمة» يحدّث القيمة ومصدره�
   assert.equal(res.ok, true);
   const i1 = data.indicators.find(i => i.id === 'ind-ar-edu-1');
   assert.equal(i1.currentValue, '1:18.8');
-  assert.equal(i1.valueSource, 'محسوب في بصيرة (التصنيف العربي 2026) · الملفات: faculty.csv · 2026-11-01');
+  assert.equal(i1.valueSource, 'محسوب في بصيرة (دورة 2026) · الملفات: faculty.csv · 2026-11-01');
   assert.equal(i1.workStatus, 'evidenced', 'حالة العمل لا تتغير');
   assert.equal(data.activities[0].action, 'calc_approve');
   assert.match(data.activities[0].summary, /AR-EDU-1: 1:18\.8 \(كانت 1:15\)/);
@@ -281,7 +281,7 @@ test('ENG-18 سجل التشغيلات: آخر 10 فقط، والإعداد وا
   for (let i = 0; i < 12; i++) A.recordCalcRun(data, c, out, [], e);
   assert.equal(data.calc.cycles.length, 1);
   assert.equal(data.calc.cycles[0].runs.length, 10);
-  assert.match(data.activities[0].summary, /شُغّل محرك الحساب \(التصنيف العربي 2026\): 3 من 8 مؤشرات بنتيجة/);
+  assert.match(data.activities[0].summary, /شُغّل محرك الحساب \(دورة 2026\): 3 من 12 مؤشرًا بنتيجة/);
   const ok = ST.validateDataset(data);
   assert.equal(ok.ok, true, ok.errors.join(' | '));
   const cases = [
@@ -347,9 +347,10 @@ test('ENG-21 فحص نطاق الروابط: 5 روابط و«2 مخالفة» �
   assert.deepEqual(q.invalid.rows, [8], '«N/A» رابط غير صالح');
   // داخل الوصفة: تنبيه في المؤشر 8
   const c = configured();
-  c.inputs.find(i => i.key === 'form8Rows').args.column = 'LINK';
-  c.recipes.find(r => r.indicatorCode === 'AR-EDU-8').linkCheck.column = 'LINK';
-  const r = byCode(E.run(c, Object.assign(tables(), { form8: table('links.csv') }), T), 'AR-EDU-8');
+  const t8 = Object.assign(tables(), { 'ind:AR-EDU-8': table('links.csv') });
+  E.autoSelect(c, t8); // عمود الروابط يُكتشف تلقائيًا
+  assert.equal(c.recipes.find(x => x.indicatorCode === 'AR-EDU-8').linkCheck.column, 'LINK');
+  const r = byCode(E.run(c, t8, T), 'AR-EDU-8');
   assert.equal(r.value, '5');
   assert.match(r.warnings.find(w => w.key === 'linkDomain').text, /2 مخالفة للنطاق scopus\.com \(الصفوف 3، 5\)/);
 });
@@ -454,4 +455,170 @@ test('ENG-25 شرح الصيغة بالعربية من شجرتها، دون م�
     'نسبة 1 إلى (مجموع (طلبة القبول والتسجيل، طلبة الدراسات العليا) ÷ العدد المكافئ للدوام الكامل من (أعضاء هيئة التدريس المتفرغون، أعضاء هيئة التدريس غير المتفرغين))');
   assert.equal(E.explainFormula('value(hCount)', c.inputs), 'أعضاء بمعامل هيرش ≥ العتبة');
   assert.match(E.explainFormula('alert(1)', c.inputs), /غير معروفة/);
+});
+
+// ---------- ربط نتائج الملفات بالمنصة ----------
+test('ENG-26 تحليل الملف الفوري: توزيع الرتب والأرقام، والأعمدة الشخصية لا تُعرض قيمها', () => {
+  const p = SRC.profile(table('faculty.csv'));
+  const col = n => p.columns.find(c => c.name === n);
+  assert.equal(p.rows, 10);
+  assert.equal(col('NAME').kind, 'personal');
+  assert.equal(col('NAME').values, undefined);
+  assert.equal(col('EMPLOYEE_ID').kind, 'personal');
+  assert.equal(col('RANK_DESC').kind, 'categorical');
+  assert.deepEqual(col('RANK_DESC').values.find(v => v.value === 'فني'), { value: 'فني', count: 2 });
+  assert.deepEqual(col('NATIONALITY').values[0], { value: 'دولة أ', count: 6 });
+  assert.deepEqual([col('RANK_CODE').kind, col('RANK_CODE').min, col('RANK_CODE').max], ['numeric', 1, 9]);
+  const t5 = SRC.profile(table('top500.csv'));
+  assert.equal(t5.columns.find(c => c.name === 'Scopus author ID').kind, 'personal');
+  assert.deepEqual([t5.columns.find(c => c.name === 'h-index').min, t5.columns.find(c => c.name === 'h-index').max], [5, 25]);
+  assert.ok(!JSON.stringify(p).includes('اسم-وهمي'), 'لا اسم في التحليل');
+});
+
+test('ENG-27 الحساب التلقائي يحدّث أحدث نتيجة دون سجل الأنشطة، وتصل النتائج إلى التنبيهات وتتحدث بعد الاعتماد', () => {
+  const I = require('../js/insights.js');
+  const data = createSampleData();
+  const e = env();
+  const before = I.alerts(data, T).length;
+  assert.equal(E.findings(data), null);
+  const c = configured();
+  const t = tables();
+  const meta = Object.keys(t).map(slot => Object.assign({ slot, quality: slot === 'top500' ? ['3 صفوف فارغة في آخر الملف (من الصف 30)'] : [] }, SRC.describe(t[slot], t[slot].fileName, T)));
+  assert.equal(A.setCalcLatest(data, c, E.storableRun(E.run(c, t, T)), meta).ok, true);
+  assert.equal(data.activities.length, 0, 'لا نشاط لكل نقرة');
+  assert.equal(data.calc.cycles[0].runs.length, 0, 'لا يدخل سجل التشغيلات');
+  const fd = E.findings(data);
+  assert.deepEqual(fd.counts, { total: 12, computed: 3, pending: 3, conflicts: 1, warnings: 2, quality: 1 });
+  assert.deepEqual(fd.items.filter(x => x.status !== 'error').map(x => x.code + ':' + x.value + ':' + x.status), ['AR-EDU-1:1:18.8:pending', 'AR-EDU-2:1:25:pending', 'AR-EDU-5:11:pending']);
+  const kinds = I.alerts(data, T).map(a => a.kind);
+  assert.equal(kinds.length, before + 1 + 3 + 2 + 1);
+  assert.equal(kinds.filter(k => k === 'calc_conflict').length, 1);
+  assert.equal(kinds.filter(k => k === 'calc_pending').length, 3);
+  assert.equal(kinds.filter(k => k === 'calc_quality').length, 1);
+  // بعد الاعتماد: AR-EDU-1 «معتمدة» ويختفي تنبيه انتظاره
+  A.approveCalculatedValue(data, 'ind-ar-edu-1', { value: '1:18.8', source: 'محسوب' }, e);
+  assert.equal(E.findings(data).items[0].status, 'approved');
+  assert.equal(I.alerts(data, T).filter(a => a.kind === 'calc_pending').length, 2);
+  // «احسب» يضيف إلى السجل، والتحقق يقبل latest والجودة
+  A.recordCalcRun(data, c, E.storableRun(E.run(c, t, T)), meta, e);
+  assert.equal(data.calc.cycles[0].runs.length, 1);
+  assert.equal(ST.validateDataset(data).ok, true);
+  const bad = JSON.parse(JSON.stringify(data));
+  bad.calc.cycles[0].sources[0].quality = [{ row: 'اسم-وهمي-01' }];
+  assert.equal(ST.validateDataset(bad).ok, false);
+  const bad2 = JSON.parse(JSON.stringify(data));
+  bad2.calc.cycles[0].latest = 'x';
+  assert.equal(ST.validateDataset(bad2).ok, false);
+});
+
+test('ENG-28 رسائل النقص ترشد إلى مكان الإكمال', () => {
+  const c = E.defaultCycle();
+  const out = E.run(c, tables(), T);
+  assert.match(out.results.find(r => r.indicatorCode === 'AR-EDU-1').error, /لم تُختر بنود .* يرجى اختيارها من «إعداد الوصفة»/);
+  assert.match(SRC.checkFile('a.xls', 10).message, /حفظ باسم.*مصنف Excel/);
+});
+
+test('ENG-29 قراءة كل الأعمدة التي فيها بيانات واستبعاد الفارغة، ولو تجاوزت عرض سطر العناوين', () => {
+  const t = SRC.tableFromCSV('الرتبة,,القسم,\nأستاذ,,قسم 1,,ملاحظة\nمحاضر,,قسم 2,,\n,,,,\n');
+  assert.deepEqual(t.columns, ['الرتبة', 'القسم', 'عمود 5']);
+  assert.deepEqual(t.records, [['أستاذ', 'قسم 1', 'ملاحظة'], ['محاضر', 'قسم 2', '']]);
+  assert.equal(t.emptyColumns, 2);
+  assert.equal(t.trailingEmpty, 1);
+});
+
+test('ENG-30 الاختيار التلقائي: كل المؤشرات تُحسب من الملفات دون أي اختيار يدوي، ولا يغيّر اختيارًا موجودًا', () => {
+  const c = E.defaultCycle(createSampleData().indicators);
+  const t = Object.assign(tables(), { 'ind:AR-EDU-3': table('quality.csv'), 'ind:AR-EDU-8': table('links.csv') });
+  const notes = E.autoSelect(c, t);
+  const get = k => c.inputs.find(i => i.key === k).args;
+  assert.deepEqual(get('admissionStudents').items, ['طلبة الدبلوم', 'طلبة البكالوريوس'], 'دون «الموظفون الإداريون»');
+  assert.deepEqual(get('facultyFull').values.slice().sort(), ['أستاذ', 'أستاذ مساعد', 'أستاذ مشارك', 'محاضر', 'معيد'].sort(), 'دون «فني»');
+  assert.deepEqual(get('phdHolders').values.slice().sort(), ['أستاذ', 'أستاذ مساعد', 'أستاذ مشارك'].sort());
+  assert.equal(c.recipes.find(r => r.indicatorCode === 'AR-EDU-8').linkCheck.column, 'LINK');
+  assert.ok(notes.length >= 6 && get('facultyFull').auto === true);
+  const out = E.run(c, t, T);
+  assert.deepEqual(['AR-EDU-1', 'AR-EDU-2', 'AR-EDU-3', 'AR-EDU-5', 'AR-EDU-8'].map(k => byCode(out, k).value), ['1:18.8', '1:25', '8', '11', '5']);
+  // صف «المجموع» لا يُعد مرتين، والاختيار الموجود لا يتغير
+  const agg = SRC.tableFromCSV('البيانات المطلوبة,القيمة\nطلبة البكالوريوس,100\nمجموع الطلبة,100\nإجمالي الطلاب,100\n');
+  const c2 = E.defaultCycle();
+  c2.inputs.find(i => i.key === 'facultyFull').args.values = ['أستاذ'];
+  E.autoSelect(c2, { admission: agg, faculty: table('faculty.csv') });
+  assert.deepEqual(c2.inputs.find(i => i.key === 'admissionStudents').args.items, ['طلبة البكالوريوس']);
+  assert.deepEqual(c2.inputs.find(i => i.key === 'facultyFull').args.values, ['أستاذ']);
+  // ملف HEQS بعمود «الرتبة الأكاديمية» بدل RANK_DESC يُكتشف عموده تلقائيًا
+  const c3 = E.defaultCycle();
+  E.autoSelect(c3, { faculty: table('staff-b.csv') });
+  assert.equal(c3.inputs.find(i => i.key === 'facultyFull').args.column, 'الرتبة الأكاديمية');
+});
+
+test('ENG-31 عمود اسمه «ID» يُقرأ باسمه لا كحرف عمود (B30)', () => {
+  const t = table('quality.csv');
+  const r = E.runInput({ key: 'x', label: 'صفوف', slot: 'form3', op: 'countWhere', args: { column: 'ID', mode: 'notEmpty' } }, { form3: t }, {});
+  assert.equal(r.value, 8);
+  const agg = table('admission.csv');
+  const b = E.runInput({ key: 'y', label: 'طلبة', slot: 'admission', op: 'pick', args: { items: ['طلبة الدبلوم'], column: 'B' } }, { admission: agg }, {});
+  assert.equal(b.value, 20, 'حرف العمود B ما زال يعمل');
+});
+
+test('ENG-32 مؤشر جديد: له ملف تلقائيًا ويُحسب بعدّ صفوفه دون أي اختيار، والمكرر تمامًا لا يُعد مرتين', () => {
+  const data = createSampleData();
+  const e = env();
+  assert.equal(A.createIndicator(data, { ranking: 'ARAB', domain: 'البحث العلمي', code: 'AR-RES-1', name: 'عدد الجوائز البحثية' }, e).ok, true);
+  data.indicators.find(i => i.code === 'AR-EDU-9').active = false;
+  const c = E.defaultCycle(data.indicators);
+  const codes = c.recipes.map(r => r.indicatorCode);
+  assert.ok(codes.includes('AR-RES-1'), 'المؤشر الجديد له وصفة');
+  assert.ok(codes.includes('QS-ISR'), 'ومؤشرات QS');
+  assert.ok(!codes.includes('AR-EDU-9'), 'والمعطل لا');
+  const inp = c.inputs.find(i => i.slot === 'ind:AR-RES-1');
+  assert.deepEqual([inp.op, inp.args], ['countRows', {}]);
+  // ملف بعنوان في الصف 3، وصف مكرر تمامًا، وصفوف وأعمدة فارغة
+  const file = SRC.tableFromCSV('قائمة الجوائز\n\nالجائزة,الباحث,السنة,,\nجائزة أ,باحث-وهمي-1,2025,,\nجائزة ب,باحث-وهمي-2,2025,,\n,,,,\nجائزة أ,باحث-وهمي-1,2025,,\nجائزة ج,باحث-وهمي-3,2024,,\n,,,,\n,,,,\n');
+  file.fileName = 'awards.csv';
+  assert.equal(file.headerRow, 3);
+  assert.equal(file.emptyColumns, 2);
+  const out = E.run(c, { 'ind:AR-RES-1': file }, T);
+  const r = byCode(out, 'AR-RES-1');
+  assert.equal(r.value, '3');
+  assert.match(r.audit.join(), /عُدّ 3 صفوف فيها بيانات · استُبعد 1 مكرر تمامًا \(الصفوف 7\)/);
+  assert.ok(r.warnings.some(w => w.key === 'duplicates' && /الصفوف 7/.test(w.text)));
+  // الحساب يصل إلى التحليل
+  A.setCalcLatest(data, c, E.storableRun(out), []);
+  const fd = E.findings(data);
+  assert.equal(fd.items.find(x => x.code === 'AR-RES-1').status, 'pending');
+  assert.equal(fd.counts.total, 12, '9 عربية (منها الجديد ودون المعطل) + 3 QS');
+});
+
+test('ENG-33 مقارنة السنتين: كل سنة من ملفها وحدها ولو اختلف عدد الصفوف، والتقدم والتغيّرات محسوبة مسبقًا', () => {
+  const data = createSampleData();
+  const c = E.defaultCycle(data.indicators);
+  const cur = Object.assign(tables(), { 'ind:AR-EDU-8': table('links.csv') });
+  const last = { admission: table('admission-2025.csv'), graduate: table('graduate-2025.csv'), faculty: table('faculty-2025.csv'), top500: table('top500-2025.csv'), 'ind:AR-EDU-8': table('links-2025.csv') };
+  assert.notEqual(last.faculty.records.length, cur.faculty.records.length, 'عدد الصفوف مختلف (8 مقابل 10)');
+  E.autoSelect(c, cur);
+  const out = E.attachLastYear(E.run(c, cur, T), E.run(c, last, T), c);
+  const ind = code => data.indicators.find(i => i.code === code);
+  const row = code => { const r = byCode(out, code); return [r.lastYear, r.value, E.compare(r, ind(code)).yoy.label, E.compare(r, ind(code)).lastYearSource]; };
+  assert.deepEqual(row('AR-EDU-1'), ['1:18.6', '1:18.8', 'تراجع 1%', 'file']); // 130 ÷ 7 ← 150 ÷ 8، والأقل أفضل
+  assert.deepEqual(row('AR-EDU-2'), ['1:26', '1:25', 'تحسّن 4%', 'file']);
+  assert.deepEqual(row('AR-EDU-5'), ['6', '11', 'تحسّن 83%', 'file']);
+  assert.deepEqual(row('AR-EDU-8'), ['3', '5', 'تحسّن 67%', 'file']);
+  const ch = byCode(out, 'AR-EDU-1').changes;
+  assert.ok(ch.includes('«طلبة البكالوريوس»: من 80 إلى 100 (زيادة 20)'));
+  assert.ok(ch.includes('«طلبة الدبلوم»: من 25 إلى 20 (نقص 5)'));
+  assert.ok(ch.includes('أعضاء هيئة التدريس المتفرغون: من 7 إلى 8 (زيادة 1)'));
+  assert.deepEqual(byCode(out, 'AR-EDU-5').changes, ['أعضاء بمعامل هيرش ≥ العتبة: من 6 إلى 11 (زيادة 5)']);
+  // دون ملف للعام الماضي: القيمة المكتوبة في المؤشر (I1: 1:19)
+  const noLast = byCode(E.run(c, cur, T), 'AR-EDU-1');
+  assert.deepEqual([E.compare(noLast, ind('AR-EDU-1')).lastYearValue, E.compare(noLast, ind('AR-EDU-1')).lastYearSource], ['1:19', 'manual']);
+  // يُحفظ مع النتيجة ويصل إلى التحليل، واعتماد قيمة العام الماضي يحل محل المكتوبة
+  A.setCalcLatest(data, c, E.storableRun(out), []);
+  const f1 = E.findings(data).items.find(x => x.code === 'AR-EDU-1');
+  assert.deepEqual([f1.lastYearValue, f1.lastYearSource, f1.yoy.label], ['1:18.6', 'file', 'تراجع 1%']);
+  const e = env();
+  assert.equal(A.approveLastYearValue(data, 'ind-ar-edu-1', '1:18.6', e).ok, true);
+  assert.equal(data.indicators.find(i => i.id === 'ind-ar-edu-1').lastYearValue, '1:18.6');
+  assert.equal(data.activities[0].action, 'calc_approve_last');
+  assert.equal(A.approveLastYearValue(data, 'ind-x', '1', e).ok, false);
+  assert.equal(ST.validateDataset(data).ok, true);
 });

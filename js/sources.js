@@ -23,7 +23,7 @@
   var NA = /^(n\/?a|na|null|none|-|—|لا يوجد|غير متوفر)$/i;
 
   var MESSAGES = {
-    xls: 'صيغة .xls القديمة غير مدعومة. يرجى فتح الملف في Excel ثم «حفظ باسم» بصيغة «CSV UTF-8» أو «Excel Workbook (.xlsx)»، ثم رفعه من جديد.',
+    xls: 'هذا الملف بصيغة .xls القديمة، ولا تُقرأ في المتصفح دون إرسالها إلى خدمة خارجية. لتحويله (أقل من دقيقة): 1) فتح الملف في Excel، 2) «ملف» ثم «حفظ باسم»، 3) اختيار النوع «مصنف Excel (*.xlsx)» أو «CSV UTF-8 (محدد بفواصل)»، 4) رفع الملف الجديد هنا.',
     unknownType: 'نوع الملف غير مدعوم. الصيغ المقبولة: CSV وxlsx.',
     tooLarge: 'الملف أكبر من 60MB. غالبًا فيه صفوف فارغة منسقة: يرجى حذفها أو نسخ الجدول إلى ملف جديد ثم رفعه.',
     empty: 'الملف فارغ أو لا يحتوي صفوفًا قابلة للقراءة.',
@@ -134,25 +134,38 @@
   function toTable(rows, headerRow) {
     var h = headerRow || detectHeaderRow(rows);
     if (h < 1 || h > rows.length) return { ok: false, message: MESSAGES.badHeader };
-    var columns = (rows[h - 1] || []).map(function (c, i) { var t = String(c).trim(); return t || 'عمود ' + (i + 1); });
+    var header = rows[h - 1] || [];
     var body = rows.slice(h);
     var lastFilled = -1;
     body.forEach(function (r, i) { if (filled(r)) lastFilled = i; });
+    /*
+     * كل الأعمدة التي فيها شيء: عنوان أو قيمة واحدة على الأقل، ولو تجاوزت عرض سطر العناوين.
+     * العمود الفارغ كليًا (مثل الأعمدة المنسقة الفارغة في Excel) لا يُقرأ.
+     */
+    var width = header.length;
+    for (var w = 0; w <= lastFilled; w++) width = Math.max(width, (body[w] || []).length);
+    var keep = [];
+    var dropped = 0;
+    for (var c = 0; c < width; c++) {
+      var has = !isBlank(header[c]);
+      for (var r = 0; !has && r <= lastFilled; r++) has = !isBlank(body[r] && body[r][c]);
+      if (has) keep.push(c); else dropped++;
+    }
+    var columns = keep.map(function (c) { var t = String(header[c] == null ? '' : header[c]).trim(); return t || 'عمود ' + (c + 1); });
     var records = [];
     var rowNumbers = [];
     var emptyInside = [];
     for (var i = 0; i <= lastFilled; i++) {
       if (!filled(body[i])) { emptyInside.push(h + i + 1); continue; }
-      var rec = [];
-      for (var c = 0; c < columns.length; c++) rec.push(String(body[i][c] == null ? '' : body[i][c]).trim());
-      records.push(rec);
+      records.push(keep.map(function (c) { return String(body[i][c] == null ? '' : body[i][c]).trim(); }));
       rowNumbers.push(h + i + 1);
     }
     var trailing = body.length - lastFilled - 1;
     if (!records.length) return { ok: false, message: MESSAGES.empty };
     return {
       ok: true, headerRow: h, columns: columns, records: records, rowNumbers: rowNumbers,
-      emptyInside: emptyInside, trailingEmpty: trailing, trailingFrom: trailing ? h + lastFilled + 2 : null
+      emptyInside: emptyInside, trailingEmpty: trailing, trailingFrom: trailing ? h + lastFilled + 2 : null,
+      emptyColumns: dropped
     };
   }
 
@@ -232,6 +245,41 @@
     return parts;
   }
 
+  /*
+   * تحليل فوري للملف بعد رفعه (للعرض فقط، لا يُخزن):
+   * - أعمدة شخصية (اسم، بريد، جوال، هوية، معرّف) لا تُحلل قيمها إطلاقًا.
+   * - عمود فئوي (قيمه تتكرر، و20 قيمة مختلفة أو أقل): القيم وأعدادها، مثل الرتب.
+   * - عمود رقمي (90% من قيمه أرقام): الأدنى والأعلى والمجموع.
+   * { rows, columns: [{ name, kind: personal|categorical|numeric|text, distinct, values, min, max, sum, empty }] }
+   */
+  var PERSONAL = /(name|اسم|e-?mail|بريد|mobile|phone|جوال|هاتف|هوي|\bid\b|_id\b|^id$|رقم)/i;
+  function profile(table) {
+    var cols = table.columns.map(function (name, ci) {
+      var vals = table.records.map(function (r) { return r[ci]; });
+      var nonEmpty = vals.filter(function (v) { return !isBlank(v); });
+      var col = { name: name, empty: vals.length - nonEmpty.length };
+      if (PERSONAL.test(name)) { col.kind = 'personal'; return col; }
+      var counts = {};
+      nonEmpty.forEach(function (v) { counts[v] = (counts[v] || 0) + 1; });
+      var keys = Object.keys(counts);
+      col.distinct = keys.length;
+      var nums = nonEmpty.map(toNumber).filter(function (n) { return n !== null; });
+      if (nonEmpty.length && nums.length >= nonEmpty.length * 0.9) {
+        col.kind = 'numeric';
+        col.min = Math.min.apply(null, nums);
+        col.max = Math.max.apply(null, nums);
+        col.sum = Math.round(nums.reduce(function (a, b) { return a + b; }, 0) * 100) / 100;
+      } else if (keys.length && keys.length <= 20 && keys.length < nonEmpty.length) {
+        col.kind = 'categorical';
+        col.values = keys.sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b, 'ar'); }).map(function (k) { return { value: k, count: counts[k] }; });
+      } else {
+        col.kind = 'text';
+      }
+      return col;
+    });
+    return { rows: table.records.length, columns: cols };
+  }
+
   // الوصف الوحيد الذي يجوز تخزينه عن ملف (06 §9).
   function describe(table, fileName, uploadedAt) {
     return { fileName: String(fileName || ''), uploadedAt: uploadedAt || '', rowCount: table.records.length, headerRow: table.headerRow, columns: table.columns.slice() };
@@ -279,6 +327,7 @@
     quality: quality,
     qualitySummary: qualitySummary,
     describe: describe,
+    profile: profile,
     isBlank: isBlank
   };
 });

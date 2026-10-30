@@ -113,6 +113,36 @@
       body);
   };
 
+  // آخر قيمة محسوبة من الملفات المصدرية لهذا المؤشر، مع «اعتماد القيمة» إذا اختلفت عن الحالية.
+  function calcSection(ctx, ind) {
+    var fd = B.engine.findings(ctx.data);
+    var x = fd && fd.items.filter(function (i) { return i.code === ind.code; })[0];
+    if (!x) return null;
+    var cycle = ctx.data.calc.cycles.filter(function (c) { return c.id === fd.cycleId; })[0];
+    return U.card('آخر قيمة محسوبة من الملفات', h('div', { class: 'stack', id: 'indicator-calc' },
+      h('p', null, U.calcStatusBadge(x.status), ' ',
+        x.value === null ? h('span', { class: 'muted' }, x.error) : ['المحسوبة: ', B.dom.ltr(x.value, 'big')],
+        x.conflict ? [' ', B.dom.badge('تعارض مع ملف التقدم (' + x.progressFileValue + ')', 'danger')] : null),
+      x.value !== null ? h('p', { class: 'small', id: 'indicator-calc-yoy' }, 'مقارنة بالعام الماضي (' + (x.lastYearValue || '—') + (x.lastYearSource === 'file' ? '، من ملفه' : x.lastYearSource === 'manual' ? '، مكتوبة' : '') + '): ', x.yoy.label, ' · ', B.format.formatDate(fd.at)) : null,
+      x.changes.length ? h('ul', { class: 'compact-list' }, x.changes.map(function (c) { return h('li', null, c); })) : null,
+      x.warnings.length ? h('ul', { class: 'compact-list' }, x.warnings.map(function (w) { return h('li', null, B.dom.badge('تنبيه', 'warning'), ' ', w); })) : null,
+      x.audit.length ? h('details', { class: 'details-toggle' }, h('summary', null, 'بيان الحساب'), h('ul', { class: 'compact-list' }, x.audit.map(function (a) { return h('li', null, a); }))) : null,
+      h('div', { class: 'form-actions' },
+        x.status === 'pending' && ind.active !== false ? h('button', { type: 'button', class: 'btn btn--primary', id: 'indicator-approve', onclick: function () {
+          U.approveCalculated(ctx, ind, x.value, B.engine.sourceText(x, cycle, ctx.today));
+        } }, 'اعتماد القيمة المحسوبة') : null,
+        x.lastYearSource === 'file' && x.lastYearValue !== ind.lastYearValue ? h('button', { type: 'button', class: 'btn btn--secondary', id: 'indicator-approve-last', onclick: function () {
+          ctx.confirm({ title: 'اعتماد قيمة العام الماضي المحسوبة؟', body: 'ستصبح قيمة العام الماضي للمؤشر ' + ind.code + ' «' + x.lastYearValue + '» (محسوبة من ملف العام الماضي)' + (ind.lastYearValue ? ' بدل «' + ind.lastYearValue + '» المكتوبة' : '') + '.', confirmLabel: 'اعتماد قيمة العام الماضي' }).then(function (ok) {
+            if (!ok) return;
+            var res = B.actions.approveLastYearValue(ctx.data, ind.id, x.lastYearValue, ctx.env());
+            if (!res.ok) { ctx.toast(res.message, 'error'); return; }
+            ctx.save('اعتُمدت قيمة العام الماضي ' + x.lastYearValue + ' للمؤشر ' + ind.code + '.');
+            ctx.rerender();
+          });
+        } }, 'اعتماد قيمة العام الماضي المحسوبة') : null,
+        h('a', { href: '#/calculate', class: 'btn btn--secondary' }, 'مصادر البيانات والحساب'))));
+  }
+
   // ---------- التفاصيل ----------
   B.views.indicator = function (ctx) {
     var ind = ctx.lookups.indicatorsById[ctx.params[0]];
@@ -159,6 +189,7 @@
       conflict ? h('div', { class: 'banner banner--danger', role: 'status' }, B.dom.icon('alert'),
         h('span', null, 'يختلف عن ملف التقدم: القيمة الحالية ', B.dom.ltr(ind.currentValue, 'strong'), ' وقيمة ملف التقدم ', B.dom.ltr(ind.progressFileValue, 'strong'), '. يُنصح بمراجعة المصدر أو تسجيل سؤال للمسؤول.')) : null,
       U.card('القيم', h('div', null, values, ind.notes ? h('p', { class: 'muted' }, 'ملاحظات: ', ind.notes) : null)),
+      calcSection(ctx, ind),
       U.card('المتطلبات المرتبطة (' + reqs.length + ')', h('div', { class: 'stack' },
         reqs.length ? U.requirementsTable(ctx, reqs, 'متطلبات المؤشر') : B.dom.emptyState('لا توجد متطلبات لهذا المؤشر', null),
         inactive ? null : h('a', { href: '#/requirements/new?indicator=' + encodeURIComponent(ind.id), class: 'btn btn--secondary' }, B.dom.icon('plus'), 'إضافة متطلب لهذا المؤشر'))),

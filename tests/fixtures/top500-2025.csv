@@ -1,0 +1,23 @@
+Top authors by h-index
+Data source: Scopus (fictional test file)
+
+Institution: جامعة وهمية
+Year range: 2020 to 2025
+
+Filtered by: none
+Exported: 2026-10-01
+
+Note: fictional values only
+
+Generated for BASIRA tests
+Rank,Name,Scopus author ID,Scholarly Output,Citations,h-index
+1,باحث-وهمي-41,92001,66,880,22
+2,باحث-وهمي-42,92002,60,800,20
+3,باحث-وهمي-43,92003,54,720,18
+4,باحث-وهمي-44,92004,42,560,14
+5,باحث-وهمي-45,92005,36,480,12
+6,باحث-وهمي-46,92006,33,440,11
+7,باحث-وهمي-47,92007,27,360,9
+8,باحث-وهمي-48,92008,24,320,8
+9,باحث-وهمي-49,92009,18,240,6
+10,باحث-وهمي-50,920010,12,160,4

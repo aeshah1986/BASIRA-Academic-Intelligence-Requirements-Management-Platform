@@ -25,15 +25,10 @@
     faculty: { label: 'المحاضرون الفعالون', kind: 'list', hint: 'قائمة أفراد فيها RANK_DESC' },
     top500: { label: 'Top 500 authors by h-index (SciVal)', kind: 'list', hint: 'سطر العناوين غالبًا في الصف 13' },
     heqs: { label: 'HEQS-F01.11 أعضاء هيئة التدريس', kind: 'list', optional: true, hint: 'اختياري: للعد الموحد مع ملف المحاضرين' },
-    keymap: { label: 'ملف ربط المفاتيح', kind: 'list', optional: true, hint: 'اختياري: EMPLOYEE_ID ورقم الهوية معًا' },
-    form3: { label: 'نموذج المؤشر 3 بعد التعبئة', kind: 'list' },
-    form4: { label: 'نموذج المؤشر 4 بعد التعبئة', kind: 'list' },
-    form6: { label: 'نموذج المؤشر 6 بعد التعبئة', kind: 'list' },
-    form7: { label: 'نموذج المؤشر 7 بعد التعبئة', kind: 'list' },
-    form8: { label: 'نموذج المؤشر 8 بعد التعبئة', kind: 'list' }
+    keymap: { label: 'ملف ربط المفاتيح', kind: 'list', optional: true, hint: 'اختياري: EMPLOYEE_ID ورقم الهوية معًا' }
   };
 
-  var OPS = ['pick', 'count', 'countWhere', 'countDistinct', 'sum', 'manual', 'countDistinctAcross'];
+  var OPS = ['pick', 'count', 'countRows', 'countWhere', 'countDistinct', 'sum', 'manual', 'countDistinctAcross'];
   var FUNCTIONS = {
     value: { arity: [1, 1], label: 'value(أ)' },
     add: { arity: [1, 20], label: 'add(أ، ب، …)' },
@@ -55,38 +50,48 @@
     if (n >= 3 && n <= 10) return n + ' صفوف';
     return n + ' صفًا';
   }
-  function slotLabel(slot) { return SLOTS[slot] ? SLOTS[slot].label : slot; }
+  function slotLabel(slot) { return /^ind:/.test(slot) ? 'ملف المؤشر ' + slot.slice(4) : SLOTS[slot] ? SLOTS[slot].label : slot; }
 
   // ---------- الدورة الافتراضية: التصنيف العربي 2026 ----------
-  function defaultCycle() {
-    var formInput = function (n) {
-      return { key: 'form' + n + 'Rows', label: 'صفوف نموذج المؤشر ' + n, slot: 'form' + n, op: 'countWhere', args: { column: '', mode: 'notEmpty' } };
-    };
-    return {
-      id: 'ARAB-2026', ranking: 'ARAB', label: 'التصنيف العربي 2026', params: { hIndexThreshold: 10 },
-      inputs: [
-        { key: 'admissionStudents', label: 'طلبة القبول والتسجيل', slot: 'admission', op: 'pick', args: { items: [], column: 'B' } },
-        { key: 'graduateStudents', label: 'طلبة الدراسات العليا', slot: 'graduate', op: 'pick', args: { items: [], column: 'B' } },
-        { key: 'facultyFull', label: 'أعضاء هيئة التدريس المتفرغون', slot: 'faculty', op: 'countWhere', args: { column: 'RANK_DESC', mode: 'in', values: [] } },
-        { key: 'facultyPart', label: 'أعضاء هيئة التدريس غير المتفرغين', op: 'manual', args: { value: '', reason: '' } },
-        { key: 'phdHolders', label: 'أعضاء هيئة التدريس حملة الدكتوراه', slot: 'faculty', op: 'countWhere', args: { column: 'RANK_DESC', mode: 'in', values: [] } },
-        { key: 'hCount', label: 'أعضاء بمعامل هيرش ≥ العتبة', slot: 'top500', op: 'countWhere', args: { column: 'h-index', mode: 'gte', param: 'hIndexThreshold' } },
-        formInput(3), formInput(4), formInput(6), formInput(7), formInput(8)
-      ],
-      recipes: [
-        { indicatorCode: 'AR-EDU-1', formula: 'ratio(add(admissionStudents, graduateStudents), fte(facultyFull, facultyPart))', direction: 'lower_better', checks: ['fte', 'phdItem'] },
-        { indicatorCode: 'AR-EDU-2', formula: 'ratio(add(admissionStudents, graduateStudents), phdHolders)', direction: 'lower_better', checks: ['phdItem'] },
-        { indicatorCode: 'AR-EDU-3', formula: 'value(form3Rows)', direction: 'higher_better', checks: [] },
-        { indicatorCode: 'AR-EDU-4', formula: 'value(form4Rows)', direction: 'higher_better', checks: [] },
-        { indicatorCode: 'AR-EDU-5', formula: 'value(hCount)', direction: 'higher_better', checks: ['hCutoff', 'hThreshold'] },
-        { indicatorCode: 'AR-EDU-6', formula: 'value(form6Rows)', direction: 'higher_better', checks: [] },
-        { indicatorCode: 'AR-EDU-7', formula: 'value(form7Rows)', direction: 'higher_better', checks: [] },
-        { indicatorCode: 'AR-EDU-8', formula: 'value(form8Rows)', direction: 'higher_better', checks: [], linkCheck: { slot: 'form8', column: '', domain: 'scopus.com' } }
-      ],
-      sources: [],
-      runs: []
-    };
+  /*
+   * دورة الحساب مبنية من المؤشرات نفسها (لا قائمة ثابتة في الكود):
+   * - المؤشرات 1 و2 و5 من التعليم والتعلم: قواعدها الخاصة (الطلبة والرتب ومعامل هيرش)، بملفاتها المشتركة.
+   * - كل مؤشر مفعّل آخر، ومنها المؤشرات الجديدة ومؤشرات QS: خانة «ملف المؤشر» تُعدّ صفوفه التي فيها بيانات تلقائيًا
+   *   (countRows) دون أي اختيار، مع فحص الروابط إن وُجد عمود روابط (ونطاق scopus.com للمؤشر 8).
+   * indicators: قائمة المؤشرات. دونها تُبنى المؤشرات الخاصة الثلاثة فقط (للفحوص).
+   */
+  var SPECIAL = ['AR-EDU-1', 'AR-EDU-2', 'AR-EDU-5'];
+  var LINK_DOMAINS = { 'AR-EDU-8': 'scopus.com' };
+  function rowsKey(code) { return 'rows_' + String(code).replace(/[^A-Za-z0-9]/g, '_'); }
+  function indicatorSlot(code) { return 'ind:' + code; }
+
+  function defaultCycle(indicators) {
+    var list = Array.isArray(indicators) ? indicators.filter(function (i) { return i.active !== false; }) : null;
+    var has = function (code) { return !list || list.some(function (i) { return i.code === code; }); };
+    var inputs = [
+      { key: 'admissionStudents', label: 'طلبة القبول والتسجيل', slot: 'admission', op: 'pick', args: { items: [], column: 'B' } },
+      { key: 'graduateStudents', label: 'طلبة الدراسات العليا', slot: 'graduate', op: 'pick', args: { items: [], column: 'B' } },
+      { key: 'facultyFull', label: 'أعضاء هيئة التدريس المتفرغون', slot: 'faculty', op: 'countWhere', args: { column: 'RANK_DESC', mode: 'in', values: [] } },
+      { key: 'facultyPart', label: 'أعضاء هيئة التدريس غير المتفرغين', op: 'manual', args: { value: '', reason: '' } },
+      { key: 'phdHolders', label: 'أعضاء هيئة التدريس حملة الدكتوراه', slot: 'faculty', op: 'countWhere', args: { column: 'RANK_DESC', mode: 'in', values: [] } },
+      { key: 'hCount', label: 'أعضاء بمعامل هيرش ≥ العتبة', slot: 'top500', op: 'countWhere', args: { column: 'h-index', mode: 'gte', param: 'hIndexThreshold' } }
+    ];
+    var recipes = [];
+    if (has('AR-EDU-1')) recipes.push({ indicatorCode: 'AR-EDU-1', formula: 'ratio(add(admissionStudents, graduateStudents), fte(facultyFull, facultyPart))', direction: 'lower_better', checks: ['fte', 'phdItem'] });
+    if (has('AR-EDU-2')) recipes.push({ indicatorCode: 'AR-EDU-2', formula: 'ratio(add(admissionStudents, graduateStudents), phdHolders)', direction: 'lower_better', checks: ['phdItem'] });
+    if (has('AR-EDU-5')) recipes.push({ indicatorCode: 'AR-EDU-5', formula: 'value(hCount)', direction: 'higher_better', checks: ['hCutoff', 'hThreshold'] });
+    (list || []).filter(function (i) { return SPECIAL.indexOf(i.code) === -1; })
+      .sort(function (a, b) { return a.ranking < b.ranking ? -1 : a.ranking > b.ranking ? 1 : (a.order || 0) - (b.order || 0); })
+      .forEach(function (i) {
+        var key = rowsKey(i.code);
+        var slot = indicatorSlot(i.code);
+        inputs.push({ key: key, label: 'صفوف ملف المؤشر ' + i.code, slot: slot, op: 'countRows', args: {} });
+        recipes.push({ indicatorCode: i.code, formula: 'value(' + key + ')', direction: 'higher_better', checks: [], linkCheck: { slot: slot, column: '', domain: LINK_DOMAINS[i.code] || '' } });
+      });
+    recipes.sort(function (a, b) { return a.indicatorCode < b.indicatorCode ? -1 : a.indicatorCode > b.indicatorCode ? 1 : 0; });
+    return { id: 'CYCLE-2026', ranking: 'ARAB', label: 'دورة 2026', params: { hIndexThreshold: 10 }, inputs: inputs, recipes: recipes, sources: [], runs: [] };
   }
+
 
   // ---------- لغة الصيغ المقيدة ----------
   function tokenize(s) {
@@ -199,7 +204,10 @@
   function ratio(a, b) { return b ? formatRatio(a / b) : null; }
 
   // ---------- العمليات على الجداول ----------
+  // اسم العمود أولًا، ثم حرف العمود (B، N) إن لم يوجد عمود بهذا الاسم. عمود اسمه «ID» لا يُعامل كحرف (خلل B30).
   function colIndexOf(table, col) {
+    var byName = table.columns.indexOf(col);
+    if (byName !== -1) return byName;
     if (/^[A-Z]{1,2}$/.test(col || '')) {
       var n = 0;
       for (var i = 0; i < col.length; i++) n = n * 26 + (col.charCodeAt(i) - 64);
@@ -224,7 +232,7 @@
   }
 
   function needColumn(table, col, input) {
-    if (!col) return { error: 'لم يُحدد العمود للمدخل ' + q(input.label) + '.' };
+    if (!col) return { error: 'لم يُحدد العمود للمدخل ' + q(input.label) + '. يرجى اختياره من «إعداد الوصفة».' };
     var i = colIndexOf(table, col);
     if (i === -1) return { error: 'العمود ' + q(col) + ' غير موجود في ملف ' + q(slotLabel(input.slot)) + '. الأعمدة الموجودة: ' + table.columns.join('، ') + '.' };
     return { index: i };
@@ -254,7 +262,7 @@
 
     if (input.op === 'pick') {
       var items = (args.items || []).filter(function (x) { return !S.isBlank(x); });
-      if (!items.length) { out.error = 'لم تُختر بنود من ملف ' + q(slotLabel(input.slot)) + ' للمدخل ' + q(input.label) + '.'; return out; }
+      if (!items.length) { out.error = 'لم تُختر بنود من ملف ' + q(slotLabel(input.slot)) + ' للمدخل ' + q(input.label) + '. يرجى اختيارها من «إعداد الوصفة».'; return out; }
       var vc = needColumn(table, args.column || 'B', input);
       if (vc.error) { out.error = vc.error; return out; }
       var parts = [];
@@ -269,6 +277,11 @@
       }
       out.value = sum;
       out.stats.items = items.slice();
+      out.stats.itemValues = {};
+      items.forEach(function (it) {
+        var rr = table.records.filter(function (r) { return String(r[0]).trim() === String(it).trim(); })[0];
+        out.stats.itemValues[it] = S.toNumber(rr[vc.index]);
+      });
       out.audit = parts.join(' + ') + ' = ' + fmtNum(sum) + ' · من ' + file + '، العمود ' + q(table.columns[vc.index]);
       return out;
     }
@@ -279,10 +292,24 @@
       return out;
     }
 
+    // countRows: عدّ تلقائي دون أي اختيار. الصفوف الفارغة لم تُقرأ أصلًا، والصف المطابق لصف قبله تمامًا لا يُعد مرتين.
+    if (input.op === 'countRows') {
+      var seenRows = {};
+      var dupRows = [];
+      table.records.forEach(function (r, i) {
+        var key = r.map(function (x) { return String(x).trim(); }).join('\u0001');
+        if (seenRows[key]) dupRows.push(table.rowNumbers[i]); else seenRows[key] = true;
+      });
+      out.value = total - dupRows.length;
+      out.stats.duplicates = dupRows;
+      out.audit = 'عُدّ ' + rowsPhrase(out.value) + ' فيها بيانات' + (dupRows.length ? ' · استُبعد ' + dupRows.length + ' مكرر تمامًا (الصفوف ' + dupRows.join('، ') + ')' : '') + ' · من ' + file;
+      return out;
+    }
+
     if (input.op === 'countWhere' || input.op === 'sum') {
       var c = needColumn(table, args.column, input);
       if (c.error) { out.error = c.error; return out; }
-      if (input.op === 'countWhere' && (args.mode || 'notEmpty') === 'in' && !(args.values || []).length) { out.error = 'لم تُختر قيم التصفية للمدخل ' + q(input.label) + ' من العمود ' + q(args.column) + '.'; return out; }
+      if (input.op === 'countWhere' && (args.mode || 'notEmpty') === 'in' && !(args.values || []).length) { out.error = 'لم تُختر قيم التصفية للمدخل ' + q(input.label) + ' من العمود ' + q(args.column) + '. يرجى اختيارها من «إعداد الوصفة».'; return out; }
       var m = matcher(input.op === 'sum' ? (args.where || { mode: 'notEmpty' }) : args, params);
       if (m.threshold !== undefined && !isFinite(m.threshold)) { out.error = 'معامل العتبة غير صالح.'; return out; }
       var whereIdx = input.op === 'sum' && args.where && args.where.column ? colIndexOf(table, args.where.column) : c.index;
@@ -361,7 +388,7 @@
       var m = v.match(/^https?:\/\/([^/?#:]+)/i);
       if (!m) { invalid.push(table.rowNumbers[k]); return; }
       var host = m[1].toLowerCase();
-      if (host === d || host.slice(-(d.length + 1)) === '.' + d) okCount++;
+      if (!d || host === d || host.slice(-(d.length + 1)) === '.' + d) okCount++;
       else violations.push(table.rowNumbers[k]);
     });
     return { ok: true, column: columnName, domain: d, total: table.records.length, matching: okCount, violations: { count: violations.length, rows: violations }, invalid: { count: invalid.length, rows: invalid } };
@@ -428,7 +455,7 @@
         var t = [];
         if (lc.violations.count) t.push(lc.violations.count + ' مخالفة للنطاق ' + lc.domain + ' (الصفوف ' + lc.violations.rows.join('، ') + ')');
         if (lc.invalid.count) t.push(lc.invalid.count + ' رابط غير صالح أو فارغ (الصفوف ' + lc.invalid.rows.join('، ') + ')');
-        w.push({ key: 'linkDomain', text: 'الروابط: ' + t.join('، و') + '.', suggest: { entityHint: 'البحث', title: 'تصحيح روابط النموذج إلى ' + lc.domain, missingData: t.join('، ') } });
+        w.push({ key: 'linkDomain', text: 'الروابط: ' + t.join('، و') + '.', suggest: { entityHint: 'البحث', title: lc.domain ? 'تصحيح روابط النموذج إلى ' + lc.domain : 'تصحيح روابط ملف المؤشر ' + recipe.indicatorCode, missingData: t.join('، ') } });
       }
     }
     return w;
@@ -455,10 +482,12 @@
       var parsed = parseFormula(rc.formula, keys);
       if (!parsed.ok) { res.error = parsed.message; return res; }
       var used = usedInputs(parsed.ast);
+      res.inputs = used;
       used.forEach(function (k) {
         var r = inputsOut[k];
         if (r.missing && res.missing.indexOf(slotLabel(r.missing)) === -1) res.missing.push(slotLabel(r.missing));
         res.audit.push(labels[k] + ': ' + (r.error ? '✗ ' + r.error : r.audit || (r.value === null ? 'غير متوفر' : fmtNum(r.value))));
+        if (r.stats && r.stats.duplicates && r.stats.duplicates.length) res.warnings.push({ key: 'duplicates', text: 'استُبعد من العدّ ' + r.stats.duplicates.length + ' صف مكرر تمامًا (الصفوف ' + r.stats.duplicates.join('، ') + '). يرجى التأكد أنه تكرار فعلًا.' });
         if (r.warning) res.warnings.push({ key: 'keymap', text: r.warning, suggest: { entityHint: 'الموارد البشرية', title: 'ملف ربط EMPLOYEE_ID برقم الهوية', missingData: 'ملف فيه المفتاحان معًا' } });
       });
       var blocking = used.filter(function (k) { return inputsOut[k].error; });
@@ -489,14 +518,54 @@
     return out;
   }
 
-  // يضيف المقارنة بقيم المؤشر: ملف التقدم (تعارض) والعام الماضي (C-YOY).
+  /*
+   * مقارنة السنتين: كل سنة تُحسب من ملفها وحده بالقواعد نفسها (قد يختلف عدد الصفوف بين السنتين، فلا تُطابَق الصفوف).
+   * يضيف إلى كل نتيجة حالية: lastYear (قيمة العام الماضي المحسوبة من ملفه)، وchanges (ما تغيّر في كل مدخل وبند).
+   */
+  // نص عربي للتغير دون أسهم أو إشارات (تنقلب في اتجاه RTL): «من 25 إلى 20 (نقص 5)».
+  function changeText(a, b) {
+    var d = Math.round((b - a) * 100) / 100;
+    return 'من ' + fmtNum(a) + ' إلى ' + fmtNum(b) + ' (' + (d > 0 ? 'زيادة ' + d : d < 0 ? 'نقص ' + Math.abs(d) : 'دون تغيير') + ')';
+  }
+  function attachLastYear(curOut, lastOut, cycle) {
+    if (!lastOut) return curOut;
+    var labels = {};
+    cycle.inputs.forEach(function (i) { labels[i.key] = i.label; });
+    curOut.results.forEach(function (r) {
+      var lr = lastOut.results.filter(function (x) { return x.indicatorCode === r.indicatorCode; })[0];
+      if (!lr) return;
+      r.lastYear = lr.value !== null && !lr.error ? lr.value : null;
+      r.lastYearError = r.lastYear === null ? lr.error : null;
+      var lines = [];
+      (r.inputs || []).forEach(function (k) {
+        var c = curOut.inputs[k], l = lastOut.inputs[k];
+        if (!c || !l || c.error || l.error || c.value === null || l.value === null) return;
+        var ci = c.stats && c.stats.itemValues, li = l.stats && l.stats.itemValues;
+        if (ci && li) {
+          Object.keys(Object.assign({}, li, ci)).forEach(function (it) {
+            if (ci[it] === undefined) lines.push(q(it) + ': ' + li[it] + ' في العام الماضي، وغير موجود هذا العام');
+            else if (li[it] === undefined) lines.push(q(it) + ': جديد هذا العام (' + ci[it] + ')');
+            else lines.push(q(it) + ': ' + changeText(li[it], ci[it]));
+          });
+        } else {
+          lines.push(labels[k] + ': ' + changeText(l.value, c.value));
+        }
+      });
+      r.changes = lines;
+    });
+    return curOut;
+  }
+
+  // يضيف المقارنة بقيم المؤشر: ملف التقدم (تعارض) والعام الماضي (C-YOY). العام الماضي المحسوب من ملفه أولًا، وإلا المكتوب في المؤشر.
   function compare(result, indicator) {
     var ind = indicator || {};
+    var fromFile = result.lastYear !== undefined && result.lastYear !== null && result.lastYear !== '';
     return {
       progressFileValue: ind.progressFileValue || '',
       conflict: result.value !== null && conflicts(result.value, ind.progressFileValue),
-      lastYearValue: ind.lastYearValue || '',
-      yoy: result.value === null ? { pct: null, label: 'لا يمكن حساب التقدم' } : yoy(result.value, ind.lastYearValue, result.direction)
+      lastYearValue: fromFile ? result.lastYear : ind.lastYearValue || '',
+      lastYearSource: fromFile ? 'file' : ind.lastYearValue ? 'manual' : '',
+      yoy: result.value === null ? { pct: null, label: 'لا يمكن حساب التقدم' } : yoy(result.value, fromFile ? result.lastYear : ind.lastYearValue, result.direction)
     };
   }
 
@@ -508,8 +577,10 @@
     return {
       at: runOut.at, cycleId: runOut.cycleId, params: runOut.params,
       results: runOut.results.map(function (r) {
-        return { indicatorCode: r.indicatorCode, value: r.value, direction: r.direction, audit: r.audit.slice(),
+        var o = { indicatorCode: r.indicatorCode, value: r.value, direction: r.direction, audit: r.audit.slice(),
           warnings: r.warnings.map(function (w) { return w.text; }), error: r.error, missing: r.missing.slice() };
+        if (r.lastYear !== undefined) { o.lastYear = r.lastYear; o.lastYearError = r.lastYearError || null; o.changes = (r.changes || []).slice(); }
+        return o;
       })
     };
   }
@@ -538,6 +609,111 @@
     // نص عربي يُعرض في صفحة المؤشر. الصيغة نفسها محفوظة في وصفة الدورة وتشغيلاتها.
     var t = 'محسوب في بصيرة (' + cycle.label + ')' + (files.length ? ' · الملفات: ' + files.join('، ') : '') + ' · ' + today;
     return t.length > 200 ? t.slice(0, 199) + '…' : t;
+  }
+
+  // ---------- الاختيار التلقائي من محتوى الملف ----------
+  /*
+   * يملأ الاختيارات الفارغة فقط (لا يغيّر اختيارًا موجودًا) بقواعد كلمات معلنة بعد توحيد الهمزات والتاء المربوطة:
+   * - بنود الطلبة في الجداول التجميعية: فيها «طلبة/طلاب/طالب»، وليست صفوف مجموع أو موظفين أو أعضاء.
+   * - الرتب الأكاديمية: فيها «أستاذ/محاضر/معيد/مدرس» وليست «فني/إداري/موظف/عامل».
+   * - حملة الدكتوراه: الرتب التي تبدأ بـ «أستاذ» (أستاذ، مشارك، مساعد).
+   * - عمود الرتبة إن لم يوجد RANK_DESC، وعمود معامل هيرش، وعمود العدّ في النماذج، وعمود الروابط.
+   * كل مدخل يُملأ تلقائيًا يُعلَّم auto: true ويُذكر في notes، والمستخدمة تعدّله من «إعداد الوصفة».
+   */
+  var RX = {
+    student: /(طلبه|طلاب|طالب)/, notStudent: /(موظف|اداري|عضو|هيئه|خريج|مجموع|اجمالي|المجموع)/,
+    academic: /(استاذ|محاضر|معيد|مدرس)/, nonAcademic: /(فني|اداري|موظف|عامل)/, phd: /^استاذ/,
+    rankCol: /(rank_desc|rank|رتب)/i, hCol: /(h.?index|هيرش)/i
+  };
+  function norm(s) { return N.normalizeText(String(s || '')); }
+
+  function autoSelect(cycle, tables) {
+    var notes = [];
+    cycle.inputs.forEach(function (inp) {
+      var t = inp.slot ? tables[inp.slot] : null;
+      if (!t) return;
+      var a = inp.args;
+      if (inp.op === 'pick' && !(a.items || []).length) {
+        var items = t.records.map(function (r) { return String(r[0]).trim(); })
+          .filter(function (x) { var n = norm(x); return RX.student.test(n) && !RX.notStudent.test(n); });
+        if (items.length) { a.items = items; a.auto = true; notes.push({ key: inp.key, text: inp.label + ': ' + items.join('، ') }); }
+      }
+      if (inp.op === 'countWhere') {
+        if (a.mode === 'in') {
+          if (!a.column || t.columns.indexOf(a.column) === -1) {
+            if (!(a.values || []).length) {
+              var rc = t.columns.filter(function (c) { return RX.rankCol.test(c); })[0];
+              if (rc) { a.column = rc; a.auto = true; }
+            }
+          }
+          if (!(a.values || []).length && t.columns.indexOf(a.column) !== -1) {
+            var dv = S.distinctValues(t, a.column).map(function (x) { return x.value; });
+            var phd = inp.key === 'phdHolders';
+            var vals = dv.filter(function (v) { var n = norm(v); return phd ? RX.phd.test(n) && !RX.nonAcademic.test(n) : RX.academic.test(n) && !RX.nonAcademic.test(n); });
+            if (vals.length) { a.values = vals; a.auto = true; notes.push({ key: inp.key, text: inp.label + ': ' + vals.join('، ') }); }
+          }
+        } else if (a.mode === 'gte') {
+          if (t.columns.indexOf(a.column) === -1) {
+            var hc = t.columns.filter(function (c) { return RX.hCol.test(c); })[0];
+            if (hc) { a.column = hc; a.auto = true; notes.push({ key: inp.key, text: inp.label + ': العمود ' + hc }); }
+          }
+        } else if (!a.column || t.columns.indexOf(a.column) === -1) {
+          a.column = t.columns[0];
+          a.auto = true;
+          notes.push({ key: inp.key, text: inp.label + ': الصفوف التي فيها قيمة في العمود ' + t.columns[0] });
+        }
+      }
+    });
+    cycle.recipes.forEach(function (rc) {
+      var lc = rc.linkCheck;
+      var t = lc && tables[lc.slot];
+      if (!t || (lc.column && t.columns.indexOf(lc.column) !== -1)) return;
+      var best = null;
+      t.columns.forEach(function (c, i) {
+        var n = t.records.filter(function (r) { return /^https?:\/\//i.test(String(r[i]).trim()); }).length;
+        if (n && (!best || n > best.n)) best = { c: c, n: n };
+      });
+      if (best) { lc.column = best.c; lc.auto = true; notes.push({ key: 'linkCheck', text: 'عمود الروابط في نموذج المؤشر 8: ' + best.c }); }
+    });
+    return notes;
+  }
+
+  // ---------- ربط النتائج ببقية المنصة ----------
+  /*
+   * أحدث نتيجة حساب محفوظة (latest، وإلا آخر تشغيل) مقارنة بالمؤشرات الحالية، لتقرأها صفحات
+   * التحليل ولوحة القيادة والمؤشر. لكل مؤشر: status = pending (محسوبة تختلف عن الحالية، بانتظار الاعتماد)
+   * | approved (مطابقة للحالية) | error (لم تُحسب). يعيد null إذا لم يُشغَّل الحساب بعد.
+   */
+  function findings(data) {
+    var cycles = data && data.calc && Array.isArray(data.calc.cycles) ? data.calc.cycles : [];
+    var cycle = cycles.filter(function (c) { return c.latest || (c.runs && c.runs.length); })[0];
+    if (!cycle) return null;
+    var run = cycle.latest || cycle.runs[0];
+    var byCode = {};
+    (data.indicators || []).forEach(function (i) { byCode[i.code] = i; });
+    var items = run.results.map(function (r) {
+      var ind = byCode[r.indicatorCode] || null;
+      var cmp = compare(r, ind);
+      var ok = r.value !== null && r.value !== undefined && !r.error;
+      return {
+        code: r.indicatorCode, indicator: ind, value: ok ? r.value : null, current: ind ? ind.currentValue || '' : '',
+        progressFileValue: cmp.progressFileValue, lastYearValue: cmp.lastYearValue, lastYearSource: cmp.lastYearSource,
+        changes: (r.changes || []).slice(), lastYearError: r.lastYearError || null,
+        conflict: ok && cmp.conflict, yoy: ok ? cmp.yoy : { pct: null, label: 'لا يمكن حساب التقدم' },
+        warnings: (r.warnings || []).map(function (w) { return typeof w === 'string' ? w : w.text; }),
+        audit: (r.audit || []).slice(), error: r.error || (ok ? null : 'لم تُحسب.'),
+        status: !ok ? 'error' : ind && ind.currentValue === r.value ? 'approved' : 'pending', direction: r.direction
+      };
+    });
+    var count = function (fn) { return items.filter(fn).length; };
+    return {
+      cycleId: cycle.id, label: cycle.label, at: run.at, sources: (cycle.sources || []).slice(), items: items,
+      counts: {
+        total: items.length, computed: count(function (x) { return x.status !== 'error'; }), pending: count(function (x) { return x.status === 'pending' && x.indicator && x.indicator.active !== false; }),
+        conflicts: count(function (x) { return x.conflict; }), warnings: items.reduce(function (s, x) { return s + x.warnings.length; }, 0),
+        quality: (cycle.sources || []).reduce(function (s, x) { return s + ((x.quality || []).length); }, 0)
+      }
+    };
   }
 
   // ---------- G2: متطلب مقترح من تنبيه ----------
@@ -587,6 +763,9 @@
     storableRun: storableRun,
     explainFormula: explainFormula,
     sourceText: sourceText,
-    suggestRequirement: suggestRequirement
+    suggestRequirement: suggestRequirement,
+    autoSelect: autoSelect,
+    findings: findings,
+    attachLastYear: attachLastYear
   };
 });

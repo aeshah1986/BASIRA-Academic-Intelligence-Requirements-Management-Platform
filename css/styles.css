@@ -623,3 +623,5 @@ a.chart__row:hover .chart__label { text-decoration: underline; }
 }
 .calculate .rtable td.col-main { min-inline-size: 180px; }
 .calculate .rtable td .compare { min-inline-size: 120px; }
+.slot__last { border-block-start: 1px dashed var(--border); padding-block-start: 8px; display: grid; gap: 4px; }
+.slot__last > p { margin: 0; overflow-wrap: anywhere; }

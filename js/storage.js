@@ -189,8 +189,8 @@
   }
 
   // بيانات محرك الحساب (اختيارية، docs/design/06 §11). لا يُقبل أي محتوى ملف: وصف الملف بمفاتيح محددة فقط (06 §9).
-  var CALC_OPS = ['pick', 'count', 'countWhere', 'countDistinct', 'sum', 'manual', 'countDistinctAcross'];
-  var SOURCE_KEYS = ['slot', 'fileName', 'uploadedAt', 'rowCount', 'headerRow', 'columns', 'sheet'];
+  var CALC_OPS = ['pick', 'count', 'countRows', 'countWhere', 'countDistinct', 'sum', 'manual', 'countDistinctAcross'];
+  var SOURCE_KEYS = ['slot', 'fileName', 'uploadedAt', 'rowCount', 'headerRow', 'columns', 'sheet', 'quality'];
   function validateCalc(calc, rankingIds, errors) {
     if (calc === undefined) return;
     if (!isObject(calc) || !Array.isArray(calc.cycles)) { errors.push('بيانات محرك الحساب «calc» غير صالحة.'); return; }
@@ -203,10 +203,11 @@
       if (!Array.isArray(c.recipes) || c.recipes.some(function (r) { return !isObject(r) || !isNonEmptyString(r.indicatorCode) || !isNonEmptyString(r.formula) || ['higher_better', 'lower_better'].indexOf(r.direction) === -1; })) errors.push(where + ': الوصفات غير صالحة.');
       if (!Array.isArray(c.sources)) errors.push(where + ': وصف الملفات ليس قائمة.');
       else c.sources.forEach(function (s) {
-        if (!isObject(s) || Object.keys(s).some(function (k) { return SOURCE_KEYS.indexOf(k) === -1; }) || typeof s.rowCount !== 'number' || !Array.isArray(s.columns)) {
+        if (!isObject(s) || Object.keys(s).some(function (k) { return SOURCE_KEYS.indexOf(k) === -1; }) || typeof s.rowCount !== 'number' || !Array.isArray(s.columns) || (s.quality !== undefined && (!Array.isArray(s.quality) || s.quality.some(function (x) { return typeof x !== 'string'; })))) {
           errors.push(where + ': وصف ملف غير صالح أو يحتوي بيانات غير مسموحة (لا يُخزن محتوى الملفات).');
         }
       });
+      if (c.latest !== undefined && (!isObject(c.latest) || !Array.isArray(c.latest.results))) errors.push(where + ': أحدث نتيجة غير صالحة.');
       if (!Array.isArray(c.runs) || c.runs.length > 10 || c.runs.some(function (r) { return !isObject(r) || !Array.isArray(r.results); })) errors.push(where + ': سجل التشغيلات غير صالح.');
     });
   }

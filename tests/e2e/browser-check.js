@@ -1063,17 +1063,23 @@ async function runCalc(cdp, tmp) {
   const status = slot => txt('[data-slot="' + slot + '"] .slot__status, [data-slot="' + slot + '"] .banner');
   async function upload(slot, file) {
     const { root } = await p.send('DOM.getDocument', { depth: -1 });
-    const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#file-' + slot });
+    const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#file-' + slot.replace(/[^A-Za-z0-9_-]/g, '_') });
     const t0 = Date.now();
     await p.send('DOM.setFileInputFiles', { nodeId, files: [file] });
     for (let i = 0; i < 150; i++) {
       await sleep(100);
       const s = await status(slot);
-      if (/مرفوع|لم يُقرأ|غير مدعومة|ليس بصيغة/.test(s)) return { ms: Date.now() - t0, status: s };
+      if (/مرفوع|لم يُقرأ|غير مدعومة|القديمة|ليس بصيغة/.test(s)) return { ms: Date.now() - t0, status: s };
     }
     return { ms: Date.now() - t0, status: 'انتهت المهلة' };
   }
-  const tick = async (name, values) => { for (const v of values) await p.clickSelector('input[name="' + name + '"][value="' + v + '"]'); };
+  // يضمن أن المربع مختار (قد يكون مختارًا تلقائيًا من قبل): لا ينقر إلا إذا لم يكن مختارًا.
+  const tick = async (name, values) => {
+    for (const v of values) {
+      const sel = 'input[name="' + name + '"][value="' + v + '"]';
+      if (!(await p.eval('return document.querySelector(' + JSON.stringify(sel) + ').checked;'))) await p.clickSelector(sel);
+    }
+  };
   const row = code => p.eval('const tr = document.querySelector(\'tr[data-key="' + code + '"]\'); return tr ? tr.textContent.replace(/\\s+/g, " ").trim() : "";');
   const calc = async () => { await p.clickSelector('#calc-run'); await sleep(300); };
   // قيمة خانة «المحسوبة» وحدها (القيمة، أو «لم تُحسب» مع الخطأ)
@@ -1086,7 +1092,7 @@ async function runCalc(cdp, tmp) {
   const ups = [];
   for (const [slot, f] of [['admission', 'admission.csv'], ['graduate', 'graduate.csv'], ['faculty', 'faculty.csv'], ['top500', 'top500.csv']]) ups.push(await upload(slot, path.join(FIX, f)));
   check('C6-01', 'رفع 4 ملفات CSV من حقل الملف: الحالة وعدد الصفوف، وسطر العناوين 13 في Top 500 (AC-CALC-01)',
-    /admission\.csv · 3 صفوف · سطر العناوين 1/.test(ups[0].status) && /faculty\.csv · 10 صفوف/.test(ups[2].status) && /top500\.csv · 15 صفًا · سطر العناوين 13 · UTF-8/.test(ups[3].status), ups.map(u => u.status).join(' | '));
+    /admission\.csv · 3 صفوف · سطر العناوين 1/.test(ups[0].status) && /faculty\.csv · 10 صفوف/.test(ups[2].status) && /top500\.csv · 15 صفًا · سطر العناوين 13 · 6 أعمدة · UTF-8/.test(ups[3].status), ups.map(u => u.status).join(' | '));
 
   // C6-02 تغيير سطر العناوين يدويًا ثم إعادته
   await p.eval('document.getElementById("hdr-top500").value = "1"; return true;');
@@ -1105,7 +1111,7 @@ async function runCalc(cdp, tmp) {
   await calc();
   const r1 = await row('AR-EDU-1'), r2 = await row('AR-EDU-2'), r5 = await row('AR-EDU-5'), r3 = await row('AR-EDU-3');
   check('C6-03', 'الحساب من الواجهة: المؤشر 1 «1:18.8» بتعارض مع ملف التقدم و«تحسّن 1%» وتنبيه FTE، والمؤشر 2 «1:25»، والمؤشر 5 «11»، والناقص «ينقصه» (AC-CALC-02/04/05/07/09)',
-    /1:18\.8/.test(r1) && /تعارض/.test(r1) && /تحسّن 1%/.test(r1) && /س10/.test(r1) && /1:25/.test(r2) && (await val('AR-EDU-5')) === '11' && /العتبة المستخدمة 10/.test(r5) && /ينقصه: نموذج المؤشر 3/.test(r3),
+    /1:18\.8/.test(r1) && /تعارض/.test(r1) && /تحسّن 1%/.test(r1) && /س10/.test(r1) && /1:25/.test(r2) && (await val('AR-EDU-5')) === '11' && /العتبة المستخدمة 10/.test(r5) && /ينقصه: ملف المؤشر AR-EDU-3/.test(r3),
     r1.slice(0, 160));
 
   // C6-04 ما حُفظ: الإعداد والوصف والنتائج فقط، ولا اسم ولا معرّف من الملفات (AC-CALC-11)
@@ -1155,6 +1161,7 @@ async function runCalc(cdp, tmp) {
   // C6-07 إدخال يدوي لغير المتفرغين (الملفات باقية في ذاكرة الصفحة بعد التنقل)
   await p.route('#/calculate');
   const still = await status('faculty');
+  await p.eval('document.getElementById("manual-fix").open = true; return true;');
   await p.clickSelector('#manual-facultyPart'); await p.typeText('3');
   await p.clickSelector('#reason-facultyPart'); await p.typeText('كشف وهمي من الموارد البشرية');
   await calc();
@@ -1172,7 +1179,7 @@ async function runCalc(cdp, tmp) {
   const xlsPath = path.join(tmp, 'المحاضرون القديم.xls');
   fs.writeFileSync(xlsPath, Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0, 0, 0]));
   const xu = await upload('top500', xlsPath);
-  check('C6-09', 'رفع .xls: رسالة «حفظ باسم» بالعربية ولا يُقرأ (AC-CALC-15)', /غير مدعومة/.test(xu.status) && /حفظ باسم/.test(xu.status), xu.status.slice(0, 100));
+  check('C6-09', 'رفع .xls: رسالة «حفظ باسم» بالعربية ولا يُقرأ (AC-CALC-15)', /بصيغة .xls القديمة/.test(xu.status) && /حفظ باسم/.test(xu.status) && /مصنف Excel/.test(xu.status), xu.status.slice(0, 100));
   await upload('top500', path.join(FIX, 'top500.csv'));
 
   // C6-10 xlsx حقيقي عبر حقل الملف: 1000 صف فارغ منسق، والنتيجة نفسها (AC-GAP-07)
@@ -1185,10 +1192,10 @@ async function runCalc(cdp, tmp) {
   check('C6-10', 'رفع xlsx فيه 1000 صف فارغ منسق: «faculty.xlsx · 10 صفوف»، والمؤشر 1 «1:16.7» كما في CSV (AC-GAP-07)', /faculty\.xlsx · 10 صفوف/.test(xl.status) && /الورقة: البيانات/.test(xl.status) && /1:16\.7/.test(r1d), xl.status);
 
   // C6-11 فحوص الجودة ونطاق الروابط في نموذجين (AC-CALC-14، AC-GAP-04)
-  await upload('form3', path.join(FIX, 'quality.csv'));
-  const q3 = await txt('[data-slot="form3"] .quality');
-  await upload('form8', path.join(FIX, 'links.csv'));
-  for (const id of ['col-form3Rows', 'col-form8Rows', 'col-linkCheck']) await p.eval('const s = document.getElementById("' + id + '"); s.value = s.querySelector("option[value=\'LINK\'], option[value=\'ID\']") ? (s.querySelector("option[value=\'LINK\']") || s.querySelector("option[value=\'ID\']")).value : ""; s.dispatchEvent(new Event("change")); return true;');
+  await upload('ind:AR-EDU-3', path.join(FIX, 'quality.csv'));
+  const q3 = await txt('[data-slot="ind:AR-EDU-3"] .quality');
+  await upload('ind:AR-EDU-8', path.join(FIX, 'links.csv'));
+  // لا اختيار أعمدة: يُعد النموذج تلقائيًا ويُكتشف عمود الروابط تلقائيًا
   await calc();
   const r8 = await row('AR-EDU-8'), r3b = await row('AR-EDU-3');
   check('C6-11', 'الجودة: «3 صفوف فارغة في آخر الملف (من الصف 10)»، ونطاق الروابط: المؤشر 8 «5» مع «2 مخالفة … (الصفوف 3، 5)» (AC-CALC-14، AC-GAP-04)',
@@ -1199,13 +1206,13 @@ async function runCalc(cdp, tmp) {
   let csv = null;
   for (let i = 0; i < 40 && !csv; i++) { await sleep(150); const f = path.join(dlDir, 'basira-calculation-' + TODAY + '.csv'); if (fs.existsSync(f)) { await sleep(150); csv = fs.readFileSync(f, 'utf8'); } }
   const lines = csv ? csv.split('\r\n').filter(Boolean) : [];
-  check('C6-12', 'تصدير تقرير الحساب: CSV بترميز UTF-8 مع BOM، ورأس و8 مؤشرات، وAR-EDU-1 بقيمته ومقارنته', csv && csv.charCodeAt(0) === 0xFEFF && lines.length === 9 && /"AR-EDU-1",".*","1:16\.7","1:11","نعم","1:19"/.test(lines[1]), (lines[1] || 'لا ملف').slice(0, 90));
+  check('C6-12', 'تصدير تقرير الحساب: CSV بترميز UTF-8 مع BOM، ورأس و12 مؤشرًا، وAR-EDU-1 بقيمته ومقارنته', csv && csv.charCodeAt(0) === 0xFEFF && lines.length === 13 && /"AR-EDU-1",".*","1:16\.7","1:11","نعم","1:19"/.test(lines[1]), (lines[1] || 'لا ملف').slice(0, 90));
 
   // C6-13 إعادة التحميل: الملفات تختفي من الذاكرة، وتبقى آخر نتائج محفوظة دون إنشاء متطلبات
   await p.goto(APP + '#/calculate');
   const after = await p.eval('return { meta: (document.getElementById("results-meta") || {}).textContent || "", slot: document.querySelector(\'[data-slot="faculty"]\').textContent, makeReq: document.querySelectorAll(".make-req").length, r1: (document.querySelector(\'tr[data-key="AR-EDU-1"]\') || {}).textContent || "" };');
   check('C6-13', 'بعد إعادة التحميل: «يلزم رفعه من جديد» للملفات، وتُعرض نتائج آخر تشغيل محفوظ، ولا أزرار متطلبات من نتائج محفوظة',
-    /نتائج آخر تشغيل محفوظ/.test(after.meta) && /آخر ملف استُخدم: «faculty\.xlsx»/.test(after.slot) && /يلزم رفعه من جديد/.test(after.slot) && after.makeReq === 0 && /1:16\.7/.test(after.r1), after.meta);
+    /نتائج آخر حساب محفوظ/.test(after.meta) && /آخر ملف استُخدم: «faculty\.xlsx»/.test(after.slot) && /يلزم رفعه من جديد/.test(after.slot) && after.makeReq === 0 && /1:16\.7/.test(after.r1), after.meta);
 
   // C6-14 الأداء في المتصفح: CSV بـ 100 ألف صف و300 ألف صف فارغ، وxlsx فيه نحو 300 ألف صف فارغ منسق
   let big = 'EMPLOYEE_ID,RANK_DESC,NAME\n';
@@ -1222,6 +1229,142 @@ async function runCalc(cdp, tmp) {
 
   const outside = requests.filter(u => !/^(file|blob|data|about|devtools):/.test(u));
   check('C6-15', 'لا طلبات شبكة خارجية ولا أخطاء في وحدة التحكم طوال سيناريوهات الحساب', !outside.length && !p.errors.length, (outside.join(', ') || requests.length + ' طلبًا محليًا') + ' · أخطاء: ' + (p.errors.join(' | ') || 'صفر'));
+  await cdp.send('Target.closeTarget', { targetId: p.targetId });
+}
+
+// ---------- ربط نتائج الملفات بالتحليل ولوحة القيادة والمؤشر (طلب المستخدمة: «أرفع الملف ولا يظهر مع التحليل») ----------
+async function runLink(cdp) {
+  const p = await openPage(cdp);
+  await p.viewport(1280, 900, false);
+  await p.goto(APP + '#/dashboard');
+  await p.eval("localStorage.removeItem('basira.v1');");
+  await p.goto(APP + '#/calculate');
+  const FIX = path.join(ROOT, 'tests', 'fixtures');
+  const txt = sel => p.eval('const e = document.querySelector(' + JSON.stringify(sel) + '); return e ? e.textContent.replace(/\\s+/g, " ").trim() : "";');
+  const stored = () => p.eval("return JSON.parse(localStorage.getItem('basira.v1') || 'null');");
+  const val = code => p.eval(`const tr = document.querySelector('tr[data-key="${code}"]'); return tr ? tr.children[1].textContent.replace(/\\s+/g, ' ').trim() : '';`);
+  async function upload(slot, file) {
+    const { root } = await p.send('DOM.getDocument', { depth: -1 });
+    const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#file-' + slot.replace(/[^A-Za-z0-9_-]/g, '_') });
+    await p.send('DOM.setFileInputFiles', { nodeId, files: [file] });
+    for (let i = 0; i < 100; i++) { await sleep(100); if (/مرفوع|القديمة|لم يُقرأ/.test(await txt('[data-slot="' + slot + '"]'))) return; }
+  }
+
+  // L-01 تحليل فوري بعد رفع ملف المحاضرين وحده، دون أي اختيار ودون «احسب»، ودون عرض الأسماء
+  await upload('faculty', path.join(FIX, 'faculty.csv'));
+  const an = await txt('[data-slot="faculty"] .file-analysis');
+  const page1 = await p.eval('return document.getElementById("main").textContent;');
+  check('L-01', 'رفع ملف وحده يُظهر «تحليل الملف» فورًا: توزيع الرتب والجنسيات، والأعمدة الشخصية دون قيمها، ولا اسم في الصفحة',
+    /RANK_DESC: .*فني \(2\)/.test(an) && /NATIONALITY: دولة أ \(6\)/.test(an) && /أعمدة شخصية لا تُعرض قيمها: EMPLOYEE_ID، NAME/.test(an) && !/اسم-وهمي/.test(page1), an.slice(0, 140));
+
+  // L-02 قراءة كاملة واختيار تلقائي: كل المؤشرات تُحسب فور الرفع دون أي نقرة ودون «احسب»
+  for (const [slot, f] of [['admission', 'admission.csv'], ['graduate', 'graduate.csv'], ['top500', 'top500.csv']]) await upload(slot, path.join(FIX, f));
+  const v5 = await val('AR-EDU-5'), v1 = await val('AR-EDU-1'), v2 = await val('AR-EDU-2');
+  const autoState = await p.eval(`return { badges: [...document.querySelectorAll('.recipe-input .badge')].filter(b => /اختيار تلقائي/.test(b.textContent)).length,
+    clerks: document.querySelector('input[name="items-admissionStudents"][value="الموظفون الإداريون"]').checked, tech: document.querySelector('input[name="values-facultyFull"][value="فني"]').checked };`);
+  check('L-02', 'فور الرفع ودون أي اختيار: المؤشر 1 «1:18.8» والمؤشر 2 «1:25» والمؤشر 5 «11»، مع شارة «اختيار تلقائي»، ودون الموظفين الإداريين والفنيين',
+    v1 === '1:18.8' && v2 === '1:25' && v5 === '11' && autoState.badges >= 4 && !autoState.clerks && !autoState.tech, JSON.stringify(autoState));
+
+  await p.eval('document.getElementById("manual-fix").open = true; return true;');
+  // L-03 تعديل الاختيار التلقائي يحدّث النتائج فورًا دون إعادة رسم الصفحة (يبقى التركيز على المربع)
+  await p.clickSelector('input[name="values-facultyFull"][value="معيد"]');
+  const v1off = await val('AR-EDU-1');
+  const focus = await p.eval('return document.activeElement.name + ":" + document.activeElement.value;');
+  await p.clickSelector('input[name="values-facultyFull"][value="معيد"]');
+  const v1on = await val('AR-EDU-1');
+  const s3 = await stored();
+  check('L-03', 'إلغاء «معيد» يغيّر المؤشر 1 فورًا إلى «1:21.4» (150 ÷ 7) وإعادته ترجع «1:18.8»، والتركيز باقٍ، ولا شيء في سجل الأنشطة',
+    v1off === '1:21.4' && v1on === '1:18.8' && focus === 'values-facultyFull:معيد' && s3.calc.cycles[0].latest && !s3.activities.some(a => a.action === 'calc_run'), v1off + ' ← ' + v1on + ' · التركيز: ' + focus + ' · أنشطة: ' + s3.activities.length);
+
+  // L-04 التحليل التشغيلي: بطاقة نتائج الحساب، والتنبيهات تشمل التعارض والانتظار
+  await p.route('#/insights');
+  const sum = await txt('#calc-findings-summary');
+  const row1 = await p.eval('const tr = [...document.querySelectorAll("#calc-findings-title ~ div tbody tr")].find(t => t.dataset.key === "AR-EDU-1"); return tr ? tr.textContent : "";');
+  const alertsTxt = await txt('#alerts-title ~ ul, #alerts-title ~ *');
+  check('L-04', 'التحليل التشغيلي يعرض نتائج الملفات: «حُسب 3 من 12 · بانتظار الاعتماد 3 · تعارض 1»، وAR-EDU-1 بتعارض، والتنبيهات تذكرها',
+    /حُسب 3 من 12 مؤشرًا · بانتظار الاعتماد 3 · تعارض مع ملف التقدم 1/.test(sum) && /1:18\.8/.test(row1) && /تعارض/.test(row1) && /بانتظار الاعتماد/.test(row1) &&
+    /المحسوب من الملفات يخالف ملف التقدم في AR-EDU-1/.test(alertsTxt) && /قيمة محسوبة بانتظار الاعتماد في AR-EDU-5/.test(alertsTxt), sum);
+
+  // L-05 لوحة القيادة: بطاقة ملفات المصدر
+  await p.route('#/dashboard');
+  const dash = await txt('#dash-sources-summary');
+  const dashAlerts = await txt('.alerts-card h2');
+  check('L-05', 'لوحة القيادة: «4 ملفات · حُسب 3 من 12» مع «بانتظار الاعتماد 3» و«تعارض 1»، وتنبيهات الحساب ضمن العدد', /4 ملفات · حُسب 3 من 12 مؤشرًا/.test(dash) && /بانتظار الاعتماد 3/.test(dash) && /تعارض 1/.test(dash) && /و\d+ للمتابعة/.test(dashAlerts), dash + ' · ' + dashAlerts);
+
+  // L-06 صفحة المؤشر: آخر قيمة محسوبة واعتمادها من هناك
+  await p.route('#/indicators/ind-ar-edu-1');
+  const sec = await txt('#indicator-calc');
+  await p.clickSelector('#indicator-approve');
+  await p.clickSelector('.dialog button', 'اعتماد القيمة');
+  const i1 = (await stored()).indicators.find(i => i.code === 'AR-EDU-1');
+  const sec2 = await txt('#indicator-calc');
+  await p.route('#/insights');
+  const sum2 = await txt('#calc-findings-summary');
+  check('L-06', 'صفحة المؤشر تعرض «بانتظار الاعتماد» 1:18.8 بتعارض، والاعتماد منها يحدّث القيمة فتصبح «معتمدة» وينقص الانتظار في التحليل إلى 2',
+    /بانتظار الاعتماد/.test(sec) && /1:18\.8/.test(sec) && /تعارض مع ملف التقدم \(1:11\)/.test(sec) && i1.currentValue === '1:18.8' && /معتمدة/.test(sec2) && /بانتظار الاعتماد 2/.test(sum2), sum2);
+
+  // L-07 بعد إعادة التحميل: النتائج المرتبطة باقية في التحليل (الملفات نفسها لا تُخزن)
+  await p.goto(APP + '#/insights');
+  const sum3 = await txt('#calc-findings-summary');
+  const raw = await p.eval("return localStorage.getItem('basira.v1');");
+  check('L-07', 'بعد إعادة التحميل: نتائج الحساب باقية في التحليل، ولا اسم من الملفات في البيانات المحفوظة', /حُسب 3 من 12/.test(sum3) && !/اسم-وهمي|باحث-وهمي|E10\d\d/.test(raw), sum3);
+
+  // L-09 في المرة القادمة: الاختيارات محفوظة، فرفع الملفات من جديد يكفي (مع إلغاء «معيد» كاختيار شخصي يبقى محفوظًا)
+  await p.route('#/calculate');
+  for (const [slot, f] of [['faculty', 'faculty.csv'], ['admission', 'admission.csv'], ['graduate', 'graduate.csv']]) await upload(slot, path.join(FIX, f));
+  await p.eval('document.getElementById("manual-fix").open = true; return true;');
+  await p.clickSelector('input[name="values-facultyFull"][value="معيد"]');
+  await p.goto(APP + '#/calculate');
+  for (const [slot, f] of [['faculty', 'faculty.csv'], ['admission', 'admission.csv'], ['graduate', 'graduate.csv']]) await upload(slot, path.join(FIX, f));
+  const again = await val('AR-EDU-1');
+  const kept = await p.eval('return document.querySelector(\'input[name="values-facultyFull"][value="معيد"]\').checked;');
+  check('L-09', 'بعد إعادة التحميل ورفع الملفات من جديد: يُحسب فورًا باختيارك المحفوظ («معيد» ما زال مستبعدًا ← «1:21.4») دون إعادة الاختيار', again === '1:21.4' && kept === false, again);
+  // L-10 مؤشر جديد من النموذج ← خانة ملفه تظهر تلقائيًا ← رفع ملفه وحده يكفي للحساب (عنوان في الصف 3، وصف مكرر، وأعمدة وصفوف فارغة)
+  await p.route('#/indicators/new?ranking=ARAB');
+  const setv = (sel, v) => p.eval('const el = document.querySelector(' + JSON.stringify(sel) + '); el.value = ' + JSON.stringify(v) + '; el.dispatchEvent(new Event("change", { bubbles: true })); return true;');
+  await setv('[name=domain]', 'البحث العلمي'); await setv('[name=code]', 'AR-RES-1'); await setv('[name=name]', 'عدد الجوائز البحثية');
+  await p.clickSelector('form button[type=submit]');
+  await p.route('#/calculate');
+  const hasSlot = await p.eval('return !!document.querySelector(\'[data-slot="ind:AR-RES-1"]\');');
+  const awards = path.join(require('os').tmpdir(), 'basira-awards-' + Date.now() + '.csv');
+  fs.writeFileSync(awards, 'قائمة الجوائز\n\nالجائزة,الباحث,السنة,,\nجائزة أ,باحث-وهمي-1,2025,,\nجائزة ب,باحث-وهمي-2,2025,,\n,,,,\nجائزة أ,باحث-وهمي-1,2025,,\nجائزة ج,باحث-وهمي-3,2024,,\n,,,,\n');
+  await upload('ind:AR-RES-1', awards);
+  fs.rmSync(awards, { force: true });
+  const st10 = await txt('[data-slot="ind:AR-RES-1"] .slot__status');
+  const v10 = await val('AR-RES-1');
+  const r10 = await p.eval('const tr = document.querySelector(\'tr[data-key="AR-RES-1"]\'); return tr ? tr.textContent : "";');
+  await p.route('#/insights');
+  const in10 = await p.eval('const tr = [...document.querySelectorAll("#calc-findings-title ~ div tbody tr")].find(t => t.dataset.key === "AR-RES-1"); return tr ? tr.textContent : "";');
+  check('L-10', 'مؤشر جديد AR-RES-1: خانة ملفه تظهر تلقائيًا، ورفع ملفه وحده يعطي 3 (سطر العناوين 3، واستبعاد عمودين فارغين وصف مكرر)، ويظهر في التحليل',
+    hasSlot && /سطر العناوين 3 · 3 أعمدة \(استُبعد 2 فارغ\)/.test(st10) && v10 === '3' && /استُبعد من العدّ 1 صف مكرر تمامًا \(الصفوف 7\)/.test(r10) && /بانتظار الاعتماد/.test(in10),
+    st10 + ' · القيمة: ' + v10);
+  // L-11 ملف العام الماضي يُرفع وحده بجانب ملف هذا العام (عدد صفوف مختلف)، وتُقارن السنتان تلقائيًا
+  await p.route('#/calculate');
+  await upload('top500', path.join(FIX, 'top500.csv'));
+  async function uploadLast(slot, file) {
+    const sid = slot.replace(/[^A-Za-z0-9_-]/g, '_');
+    const { root } = await p.send('DOM.getDocument', { depth: -1 });
+    const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#last-' + sid });
+    await p.send('DOM.setFileInputFiles', { nodeId, files: [file] });
+    for (let i = 0; i < 100; i++) { await sleep(100); if (/العام الماضي .*·|لم يُقرأ/.test(await txt('[data-last="' + slot + '"]'))) return; }
+  }
+  for (const [slot, f] of [['admission', 'admission-2025.csv'], ['graduate', 'graduate-2025.csv'], ['faculty', 'faculty-2025.csv'], ['top500', 'top500-2025.csv']]) await uploadLast(slot, path.join(FIX, f));
+  const last5 = await txt('[data-last="top500"]');
+  const r5y = await p.eval('const tr = document.querySelector(\'tr[data-key="AR-EDU-5"]\'); return tr ? tr.textContent.replace(/\\s+/g, " ") : "";');
+  const r2y = await p.eval('const tr = document.querySelector(\'tr[data-key="AR-EDU-2"]\'); return tr ? tr.textContent.replace(/\\s+/g, " ") : "";');
+  await p.route('#/insights');
+  const in5 = await p.eval('const tr = [...document.querySelectorAll("#calc-findings-title ~ div tbody tr")].find(t => t.dataset.key === "AR-EDU-5"); return tr ? tr.textContent : "";');
+  await p.route('#/indicators/ind-ar-edu-2');
+  const yoy2 = await txt('#indicator-calc-yoy');
+  await p.clickSelector('#indicator-approve-last');
+  await p.clickSelector('.dialog button', 'اعتماد قيمة العام الماضي');
+  const i2 = (await stored()).indicators.find(i => i.code === 'AR-EDU-2');
+  check('L-11', 'ملف العام الماضي (10 صفوف مقابل 15): المؤشر 5 «6 ← 11» و«تحسّن 83%»، والمؤشر 2 «1:26 ← 1:25» و«تحسّن 4%»، وتظهر في التحليل وصفحة المؤشر، واعتماد قيمة العام الماضي يحفظها',
+    /top500-2025\.csv · 10 صفوف/.test(last5) && /العام الماضي: 6 \(من ملفه\)/.test(r5y) && /تحسّن 83%/.test(r5y) && /أعضاء بمعامل هيرش ≥ العتبة: من 6 إلى 11 \(زيادة 5\)/.test(r5y) &&
+    /العام الماضي: 1:26 \(من ملفه\)/.test(r2y) && /تحسّن 4%/.test(r2y) && /«طلبة البكالوريوس»: من 80 إلى 100 \(زيادة 20\)/.test(r2y) &&
+    /تحسّن 83%/.test(in5) && /من ملف العام الماضي/.test(in5) && /1:26، من ملفه\): تحسّن 4%/.test(yoy2) && i2.lastYearValue === '1:26',
+    yoy2 + ' · قيمة العام الماضي المعتمدة: ' + i2.lastYearValue);
+  check('L-08', 'لا أخطاء في وحدة التحكم طوال سيناريوهات الربط', !p.errors.length, p.errors.join(' | ') || 'صفر');
   await cdp.send('Target.closeTarget', { targetId: p.targetId });
 }
 
@@ -1251,6 +1394,7 @@ async function main() {
     await runPhase5(cdp, tmp);
     await runQA(cdp);
     await runCalc(cdp, tmp);
+    await runLink(cdp);
     if (ARTIFACTS) console.log('\nPDF الطباعة: ' + pdfPath);
   } catch (err) {
     check('E-ERR', 'خطأ في تشغيل الفحص', false, err.message);
