@@ -87,18 +87,30 @@ module.exports = {
   'AC-COM-06': { status: 'not_implemented', note: 'السؤال التلقائي عند الموعد الداخلي لم يُنفذ (docs/design/09 §4).' },
   'AC-COM-09': { tests: ['P5-13'] },
   'AC-COM-10': { status: 'not_implemented', note: 'نموذج التعبئة CSV للجهات لم يُنفذ، ويعتمد على محرك الحساب (06).' },
-  'AC-GAP-01': { tests: ['مؤشر: تعديل القيم وشرطا'], partial: 'شرط «مصدر الرقم» مفحوص ومنفذ. أما ملء المصدر تلقائيًا عند الاعتماد من المحرك فغير منفذ (يعتمد على 06).' },
-  'AC-GAP-02': { status: 'not_implemented', note: 'إنشاء متطلب من تنبيه المحرك يعتمد على محرك الحساب (06) غير المنفذ.' },
-  'AC-GAP-03': { status: 'not_implemented', note: 'ملف ربط المفاتيح جزء من محرك الحساب (06).' },
-  'AC-GAP-04': { status: 'not_implemented', note: 'فحص نطاق الروابط جزء من محرك الحساب (06).' },
+  'AC-GAP-01': { tests: ['مؤشر: تعديل القيم وشرطا', 'C6-05'] },
+  'AC-GAP-02': { tests: ['C6-06'] },
+  'AC-GAP-03': { tests: [], partial: 'منطق العدد الموحد عبر ملف الربط مفحوص آليًا (ENG-20) وخانتا HEQS وملف الربط موجودتان في الصفحة، لكن لا وصفة افتراضية تستخدمه بعد، فلا يظهر في نتائج المؤشرات.' },
+  'AC-GAP-04': { tests: ['C6-11'] },
   'AC-GAP-05': { status: 'not_implemented', note: 'قائمة الإدخال (G5) لم تُنفذ.' },
   'AC-GAP-06': { status: 'not_implemented', note: 'تتبع الأدلة منفذ بحالات «بانتظار التحقق / متحقق / مرفوض»، لكن حالة «أُرسل للتوقيع» وموعدها وعدادها في لوحة القيادة غير منفذة.' },
-  'AC-GAP-07': { status: 'not_implemented', note: 'قراءة xlsx جزء من محرك الحساب (06).' },
+  'AC-GAP-07': { tests: ['C6-10', 'C6-14'] },
   'AC-GAP-08': { status: 'not_implemented', note: 'تذكير النسخ الاحتياطي وتحذير النسخة الأقدم لم يُنفذا.' },
   'AC-GAP-09': { status: 'not_implemented', note: 'حقل lastYearEvidenceRef وسطره في الخطاب لم يُنفذا.' }
 };
 
-// حالات محرك الحساب كلها غير منفذة (التصميم 06 مؤجل، G14 في PROJECT_PLAN.md).
-for (let i = 1; i <= 15; i++) {
-  module.exports['AC-CALC-' + String(i).padStart(2, '0')] = { status: 'not_implemented', note: 'محرك الحساب من الملفات المصدرية (docs/design/06) لم يُنفذ بعد (G14).' };
-}
+// محرك الحساب (المرحلة 6): الربط التلقائي بأسماء الفحوص (ENG-xx وC6-xx)، وهنا أدلة المتصفح الإضافية.
+Object.assign(module.exports, {
+  'AC-CALC-01': { tests: ['C6-01', 'C6-02'] },
+  'AC-CALC-02': { tests: ['C6-03'] },
+  'AC-CALC-03': { tests: ['L-02'] },
+  'AC-CALC-04': { tests: ['C6-03'] },
+  'AC-CALC-05': { tests: ['C6-03'] },
+  'AC-CALC-07': { tests: ['C6-07'] },
+  'AC-CALC-08': { tests: ['L-11'] },
+  'AC-CALC-09': { tests: ['C6-03', 'L-04'] },
+  'AC-CALC-10': { tests: ['C6-05', 'L-06'] },
+  'AC-CALC-11': { tests: ['C6-04', 'L-07'] },
+  'AC-CALC-12': { tests: ['C6-08'] },
+  'AC-CALC-14': { tests: ['C6-11'] },
+  'AC-CALC-15': { tests: ['C6-09'] }
+});
