@@ -600,3 +600,26 @@ a.chart__row:hover .chart__label { text-decoration: underline; }
   details.details-toggle > *:not(summary) { display: block; }
   .ranked__item, .alert, .chart li { break-inside: avoid; }
 }
+
+/* ---------- المرحلة 6: مصادر البيانات والحساب ---------- */
+.section-title { font-size: 20px; color: var(--navy-900); margin-block: 24px 12px; }
+.slot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-block-end: 16px; }
+.slot { margin: 0; display: grid; gap: 8px; align-content: start; }
+.slot__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.slot__title { margin: 0; font-size: 17px; color: var(--navy-800); }
+.slot__status { margin: 0; overflow-wrap: anywhere; }
+.slot__cols { overflow-wrap: anywhere; }
+.input--narrow { max-inline-size: 140px; }
+.quality li { overflow-wrap: anywhere; }
+.recipe-input { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: grid; gap: 8px; }
+.recipe-input > p { margin: 0; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.calc-value { font-size: 18px; }
+.calc-error { font-size: 14px; overflow-wrap: anywhere; }
+.warn-list li { overflow-wrap: anywhere; }
+.yoy { font-weight: 600; }
+@media (max-width: 1023px) {
+  .slot-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.calculate .rtable td.col-main { min-inline-size: 180px; }
+.calculate .rtable td .compare { min-inline-size: 120px; }

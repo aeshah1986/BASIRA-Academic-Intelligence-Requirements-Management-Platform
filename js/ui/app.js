@@ -241,6 +241,7 @@
   var ROUTES = [
     { re: /^\/dashboard$/, view: 'dashboard', nav: 'dashboard' },
     { re: /^\/insights$/, view: 'insights', nav: 'insights' },
+    { re: /^\/calculate$/, view: 'calculate', nav: 'calculate' },
     { re: /^\/letters\/templates$/, view: 'letterTemplates', nav: 'letters' },
     { re: /^\/letters$/, view: 'letters', nav: 'letters' },
     { re: /^\/rankings$/, view: 'rankings', nav: 'rankings' },
@@ -270,6 +271,7 @@
     { key: 'dashboard', href: '#/dashboard', label: 'لوحة القيادة', short: 'القيادة', icon: 'home', mobile: true },
     { key: 'insights', href: '#/insights', label: 'التحليل التشغيلي', short: 'التحليل', icon: 'pulse' },
     { key: 'rankings', href: '#/rankings', label: 'التصنيفات والمؤشرات', short: 'المؤشرات', icon: 'chart', mobile: true },
+    { key: 'calculate', href: '#/calculate', label: 'مصادر البيانات والحساب', short: 'الحساب', icon: 'database' },
     { key: 'requirements', href: '#/requirements', label: 'المتطلبات', short: 'المتطلبات', icon: 'list', mobile: true },
     { key: 'entities', href: '#/entities', label: 'الجهات والمسؤوليات', short: 'الجهات', icon: 'building' },
     { key: 'evidence', href: '#/evidence', label: 'الأدلة', short: 'الأدلة', icon: 'shield' },

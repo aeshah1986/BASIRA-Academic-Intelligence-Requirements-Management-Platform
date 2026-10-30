@@ -139,7 +139,9 @@ const ROUTES = ['#/dashboard', '#/rankings', '#/rankings?ranking=QS', '#/indicat
   '#/activity', '#/requirements/missing', '#/indicators/new', '#/entities/new', '#/entities/ent-hr/edit', '#/evidence', '#/evidence/new',
   '#/followups?tab=all', '#/decisions/new', '#/decisions/dec-1/resolve',
   // المرحلة 5
-  '#/insights', '#/letters', '#/letters?entity=ent-hr&level=L2', '#/letters/templates', '#/reports?type=priorities', '#/reports?type=response'];
+  '#/insights', '#/letters', '#/letters?entity=ent-hr&level=L2', '#/letters/templates', '#/reports?type=priorities', '#/reports?type=response',
+  // المرحلة 6
+  '#/calculate'];
 
 async function sweep(page, label) {
   const problems = [];
@@ -939,13 +941,14 @@ async function runQA(cdp) {
     'شارات المواعيد: ' + badges + ' · المسار المجهول ← ' + nf.hash + ' · F3: «' + f3 + '»');
 
   // Q-11 العربية وRTL في كل الصفحات: لا كلمات لاتينية خارج المصطلحات المسموحة، ولا undefined/NaN/null
-  const ALLOWED = /^(QS|CSV|JSON|Scopus|SciVal|FTE|Excel|PDF|UTF|BOM|AARU|L[0-4]|Tab|https?|example|org|basira|evidence|ar|edu)$/i;
+  // المصطلحات المسموحة: الصيغ، وأسماء المنصات، وأسماء الملفات والأعمدة كما في الملفات المصدرية (RANK_DESC، وTop 500 authors by h-index).
+  const ALLOWED = /^(QS|CSV|JSON|Scopus|SciVal|FTE|Excel|PDF|UTF|BOM|AARU|L[0-4]|Tab|https?|example|org|basira|evidence|ar|edu|xlsx|xls|FAQ|HEQS|Top|authors|by|index|RANK|DESC|EMPLOYEE|ID|Windows|csv|scopus|com)$/i;
   const leaks = [];
   async function scanArabic(label) {
     for (const r of ROUTES) {
       await p.route(r);
       const res = await p.eval(`const texts = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        while (w.nextNode()) { const n = w.currentNode; const el = n.parentElement; if (!el || el.closest('script,style,svg,.visually-hidden') || !el.getClientRects().length) continue; texts.push(n.textContent); }
+        while (w.nextNode()) { const n = w.currentNode; const el = n.parentElement; if (!el || el.closest('script,style,svg,code,.visually-hidden') || !el.getClientRects().length) continue; texts.push(n.textContent); }
         document.querySelectorAll('[placeholder],[aria-label],[title]').forEach(e => ['placeholder', 'aria-label', 'title'].forEach(a => { if (e.getAttribute(a)) texts.push(e.getAttribute(a)); }));
         return { dir: document.documentElement.dir, mainDir: getComputedStyle(document.getElementById('main')).direction, text: texts.join(' \\n ') };`);
       const cleaned = res.text.replace(/https?:\/\/\S+/g, ' ').replace(/\b[A-Z]{2,}(-[A-Z0-9]+)+\b/g, ' ').replace(/basira-[\w-]+\.(json|csv)/g, ' ');
@@ -1010,6 +1013,218 @@ async function runQA(cdp) {
   await cdp.send('Target.closeTarget', { targetId: p.targetId });
 }
 
+// ---------- المرحلة 6: صفحة مصادر البيانات والحساب (رفع ملفات حقيقي) ----------
+// أرشيف ZIP صحيح لبناء ملفات xlsx وهمية في المجلد المؤقت (نفس منطق tests/engine.test.js).
+function crc32(buf) {
+  let c, crc = 0xFFFFFFFF;
+  for (let n = 0; n < buf.length; n++) { c = (crc ^ buf[n]) & 0xFF; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function zipFiles(files) {
+  const zlib = require('node:zlib');
+  const locals = [], centrals = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const raw = Buffer.from(text, 'utf8'), data = zlib.deflateRawSync(raw), nm = Buffer.from(name, 'utf8'), crc = crc32(raw);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0x0800, 6); lh.writeUInt16LE(8, 8); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(nm.length, 26);
+    const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(0x0800, 8); ch.writeUInt16LE(8, 10); ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(nm.length, 28); ch.writeUInt32LE(offset, 42);
+    locals.push(lh, nm, data); centrals.push(ch, nm); offset += lh.length + nm.length + data.length;
+  }
+  const cd = Buffer.concat(centrals), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, cd, end]);
+}
+function xlsxBuffer(rows, emptyRows) {
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  let xml = rows.map((r, ri) => '<row r="' + (ri + 1) + '">' + r.map((v, ci) => v === '' ? '' : (/^-?\d+(\.\d+)?$/.test(v)
+    ? '<c r="' + String.fromCharCode(65 + ci) + (ri + 1) + '"><v>' + v + '</v></c>'
+    : '<c r="' + String.fromCharCode(65 + ci) + (ri + 1) + '" t="inlineStr"><is><t>' + esc(v) + '</t></is></c>')).join('') + '</row>').join('');
+  const parts = [xml];
+  for (let k = 0; k < (emptyRows || 0); k++) { const rn = rows.length + 1 + k; parts.push('<row r="' + rn + '" spans="1:14" s="3" customFormat="1"><c r="A' + rn + '" s="3"/><c r="B' + rn + '" s="3"/></row>'); }
+  return zipFiles([
+    ['xl/workbook.xml', '<workbook xmlns:r="r"><sheets><sheet name="البيانات" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ['xl/worksheets/sheet1.xml', '<worksheet><sheetData>' + parts.join('') + '</sheetData></worksheet>']
+  ]);
+}
+
+async function runCalc(cdp, tmp) {
+  const p = await openPage(cdp);
+  await p.viewport(1280, 900, false);
+  const requests = [];
+  cdp.on(m => { if (m.sessionId === p.sessionId && m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url); });
+  await p.send('Network.enable');
+  await p.goto(APP + '#/dashboard');
+  await p.eval("localStorage.removeItem('basira.v1');");
+  await p.goto(APP + '#/calculate');
+  const FIX = path.join(ROOT, 'tests', 'fixtures');
+  const stored = () => p.eval("return JSON.parse(localStorage.getItem('basira.v1') || 'null');");
+  const txt = sel => p.eval('const e = document.querySelector(' + JSON.stringify(sel) + '); return e ? e.textContent.replace(/\\s+/g, " ").trim() : "";');
+  const status = slot => txt('[data-slot="' + slot + '"] .slot__status, [data-slot="' + slot + '"] .banner');
+  async function upload(slot, file) {
+    const { root } = await p.send('DOM.getDocument', { depth: -1 });
+    const { nodeId } = await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#file-' + slot });
+    const t0 = Date.now();
+    await p.send('DOM.setFileInputFiles', { nodeId, files: [file] });
+    for (let i = 0; i < 150; i++) {
+      await sleep(100);
+      const s = await status(slot);
+      if (/مرفوع|لم يُقرأ|غير مدعومة|ليس بصيغة/.test(s)) return { ms: Date.now() - t0, status: s };
+    }
+    return { ms: Date.now() - t0, status: 'انتهت المهلة' };
+  }
+  const tick = async (name, values) => { for (const v of values) await p.clickSelector('input[name="' + name + '"][value="' + v + '"]'); };
+  const row = code => p.eval('const tr = document.querySelector(\'tr[data-key="' + code + '"]\'); return tr ? tr.textContent.replace(/\\s+/g, " ").trim() : "";');
+  const calc = async () => { await p.clickSelector('#calc-run'); await sleep(300); };
+  // قيمة خانة «المحسوبة» وحدها (القيمة، أو «لم تُحسب» مع الخطأ)
+  const val = code => p.eval(`const tr = document.querySelector('tr[data-key="${code}"]'); return tr ? tr.children[1].textContent.replace(/\\s+/g, ' ').trim() : '';`);
+  const dlDir = path.join(tmp, 'downloads');
+  fs.mkdirSync(dlDir, { recursive: true });
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir, eventsEnabled: true });
+
+  // C6-01 رفع أربعة ملفات من حقل الملف الحقيقي، واكتشاف سطر العناوين 13
+  const ups = [];
+  for (const [slot, f] of [['admission', 'admission.csv'], ['graduate', 'graduate.csv'], ['faculty', 'faculty.csv'], ['top500', 'top500.csv']]) ups.push(await upload(slot, path.join(FIX, f)));
+  check('C6-01', 'رفع 4 ملفات CSV من حقل الملف: الحالة وعدد الصفوف، وسطر العناوين 13 في Top 500 (AC-CALC-01)',
+    /admission\.csv · 3 صفوف · سطر العناوين 1/.test(ups[0].status) && /faculty\.csv · 10 صفوف/.test(ups[2].status) && /top500\.csv · 15 صفًا · سطر العناوين 13 · UTF-8/.test(ups[3].status), ups.map(u => u.status).join(' | '));
+
+  // C6-02 تغيير سطر العناوين يدويًا ثم إعادته
+  await p.eval('document.getElementById("hdr-top500").value = "1"; return true;');
+  await p.clickSelector('[data-slot="top500"] .inline-form button', 'تطبيق');
+  const hdr1 = await txt('[data-slot="top500"] .slot__cols');
+  await p.eval('document.getElementById("hdr-top500").value = "13"; return true;');
+  await p.clickSelector('[data-slot="top500"] .inline-form button', 'تطبيق');
+  const hdr13 = await txt('[data-slot="top500"] .slot__cols');
+  check('C6-02', 'تغيير سطر العناوين يدويًا يغيّر الأعمدة، والعودة إلى 13 تعيدها (AC-CALC-01)', /Top authors by h-index/.test(hdr1) && /h-index/.test(hdr13) && !/Top authors/.test(hdr13), hdr13);
+
+  // C6-03 اختيار البنود والرتب بنقرات حقيقية، ثم «احسب»
+  await tick('items-admissionStudents', ['طلبة الدبلوم', 'طلبة البكالوريوس']);
+  await tick('items-graduateStudents', ['طلبة الدبلوم العالي', 'طلبة الماجستير', 'طلبة الدكتوراه']);
+  await tick('values-facultyFull', ['أستاذ', 'أستاذ مشارك', 'أستاذ مساعد', 'محاضر', 'معيد']);
+  await tick('values-phdHolders', ['أستاذ', 'أستاذ مشارك', 'أستاذ مساعد']);
+  await calc();
+  const r1 = await row('AR-EDU-1'), r2 = await row('AR-EDU-2'), r5 = await row('AR-EDU-5'), r3 = await row('AR-EDU-3');
+  check('C6-03', 'الحساب من الواجهة: المؤشر 1 «1:18.8» بتعارض مع ملف التقدم و«تحسّن 1%» وتنبيه FTE، والمؤشر 2 «1:25»، والمؤشر 5 «11»، والناقص «ينقصه» (AC-CALC-02/04/05/07/09)',
+    /1:18\.8/.test(r1) && /تعارض/.test(r1) && /تحسّن 1%/.test(r1) && /س10/.test(r1) && /1:25/.test(r2) && (await val('AR-EDU-5')) === '11' && /العتبة المستخدمة 10/.test(r5) && /ينقصه: نموذج المؤشر 3/.test(r3),
+    r1.slice(0, 160));
+
+  // C6-04 ما حُفظ: الإعداد والوصف والنتائج فقط، ولا اسم ولا معرّف من الملفات (AC-CALC-11)
+  const raw = await p.eval("return localStorage.getItem('basira.v1');");
+  const st = JSON.parse(raw);
+  const secrets = [];
+  const SRC = require(path.join(ROOT, 'js', 'sources.js'));
+  for (const f of ['faculty.csv', 'top500.csv']) {
+    const t = SRC.tableFromCSV(fs.readFileSync(path.join(FIX, f), 'utf8'));
+    for (const col of ['NAME', 'Name', 'EMPLOYEE_ID', 'Scopus author ID']) { const v = SRC.column(t, col); if (v) secrets.push(...v); }
+  }
+  const leaked = secrets.filter(s => raw.includes(s));
+  const cyc = st.calc && st.calc.cycles[0];
+  check('C6-04', 'الحفظ بعد «احسب»: الإعداد ووصف 4 ملفات وتشغيل واحد، ولا أي اسم أو معرّف من 50 قيمة شخصية وهمية (AC-CALC-11)',
+    cyc && cyc.runs.length === 1 && cyc.sources.length === 4 && cyc.inputs.find(i => i.key === 'facultyFull').args.values.length === 5 && !leaked.length,
+    'المسرّب: ' + (leaked.join('، ') || 'لا شيء') + ' · الملفات: ' + (cyc ? cyc.sources.map(s => s.fileName + ':' + s.rowCount).join('، ') : '—'));
+
+  // C6-05 «اعتماد القيمة»: الإلغاء لا يغيّر شيئًا، والتأكيد يحدّث القيمة والمصدر فقط (AC-CALC-10، AC-GAP-01)
+  await p.clickSelector('button.approve[data-code="AR-EDU-1"]');
+  const dlg = await txt('.dialog__body');
+  await p.clickSelector('.dialog button', 'إلغاء');
+  const afterCancel = (await stored()).indicators.find(i => i.code === 'AR-EDU-1').currentValue;
+  await p.clickSelector('button.approve[data-code="AR-EDU-1"]');
+  await p.clickSelector('.dialog button', 'اعتماد القيمة');
+  const s5 = await stored();
+  const i1 = s5.indicators.find(i => i.code === 'AR-EDU-1');
+  const approvedCell = await row('AR-EDU-1');
+  check('C6-05', '«اعتماد القيمة»: التأكيد يذكر القيمتين، و«إلغاء» لا يغيّر شيئًا، والتأكيد يحدّث القيمة والمصدر دون حالة العمل، ويُسجَّل (AC-CALC-10، AC-GAP-01)',
+    /«1:18\.8» بدل «1:15»/.test(dlg) && afterCancel === '1:15' && i1.currentValue === '1:18.8' && /^محسوب في بصيرة/.test(i1.valueSource) && i1.workStatus === 'evidenced' && s5.activities[0].action === 'calc_approve' && /معتمدة/.test(approvedCell),
+    'بعد الإلغاء: ' + afterCancel + ' · بعد الاعتماد: ' + i1.currentValue + ' · المصدر: ' + i1.valueSource.slice(0, 60));
+
+  // C6-06 متطلب من تنبيه FTE، والضغط مرة ثانية لا يكرره (AC-GAP-02)
+  const nBefore = (await stored()).requirements.length;
+  await p.clickSelector('tr[data-key="AR-EDU-1"] .make-req');
+  const reqDlg = await txt('.dialog__body');
+  await p.clickSelector('.dialog button', 'إنشاء المتطلب');
+  const s6 = await stored();
+  const made = s6.requirements.find(r => r.title === 'بيانات أعضاء هيئة التدريس غير المتفرغين');
+  await p.route('#/calculate');
+  await p.clickSelector('tr[data-key="AR-EDU-1"] .make-req');
+  await sleep(300);
+  const dup = await p.eval('return { hash: location.hash, toast: [...document.querySelectorAll(".toast")].map(t => t.textContent).join(" "), n: JSON.parse(localStorage.getItem("basira.v1")).requirements.length };');
+  check('C6-06', 'متطلب من تنبيه FTE: التأكيد يذكر الموارد البشرية، فيُنشأ متطلب واحد، والضغط الثاني يفتح الموجود دون تكرار (AC-GAP-02)',
+    /وحدة الموارد البشرية/.test(reqDlg) && made && made.entityId === 'ent-hr' && s6.requirements.length === nBefore + 1 && dup.n === nBefore + 1 && /لم يُنشأ متطلب مكرر/.test(dup.toast) && dup.hash === '#/requirements/' + made.id,
+    reqDlg.slice(0, 80) + ' · ' + dup.hash);
+
+  // C6-07 إدخال يدوي لغير المتفرغين (الملفات باقية في ذاكرة الصفحة بعد التنقل)
+  await p.route('#/calculate');
+  const still = await status('faculty');
+  await p.clickSelector('#manual-facultyPart'); await p.typeText('3');
+  await p.clickSelector('#reason-facultyPart'); await p.typeText('كشف وهمي من الموارد البشرية');
+  await calc();
+  const r1b = await row('AR-EDU-1');
+  check('C6-07', 'غير المتفرغين = 3 بسبب مكتوب: المؤشر 1 «1:16.7» ويختفي تنبيه FTE، والملفات باقية في الذاكرة بعد التنقل (AC-CALC-07)', /مرفوع/.test(still) && /1:16\.7/.test(r1b) && !/س10/.test(r1b), r1b.slice(0, 100));
+
+  // C6-08 ملف بلا العمود المطلوب في خانة المحاضرين ← رسالة تسمي العمود ولا حساب (AC-CALC-12)
+  await upload('faculty', path.join(FIX, 'staff-b.csv'));
+  await calc();
+  const r1c = await row('AR-EDU-1');
+  const r5c = await row('AR-EDU-5');
+  check('C6-08', 'ملف محاضرين بلا «RANK_DESC»: المؤشر 1 لم يُحسب برسالة تسمي العمود، والمؤشر 5 يُحسب (AC-CALC-12)', /لم تُحسب/.test(r1c) && /العمود «RANK_DESC» غير موجود/.test(r1c) && (await val('AR-EDU-5')) === '11', r1c.slice(0, 120));
+
+  // C6-09 ملف .xls القديم يُرفض برسالة إرشادية (AC-CALC-15)
+  const xlsPath = path.join(tmp, 'المحاضرون القديم.xls');
+  fs.writeFileSync(xlsPath, Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0, 0, 0]));
+  const xu = await upload('top500', xlsPath);
+  check('C6-09', 'رفع .xls: رسالة «حفظ باسم» بالعربية ولا يُقرأ (AC-CALC-15)', /غير مدعومة/.test(xu.status) && /حفظ باسم/.test(xu.status), xu.status.slice(0, 100));
+  await upload('top500', path.join(FIX, 'top500.csv'));
+
+  // C6-10 xlsx حقيقي عبر حقل الملف: 1000 صف فارغ منسق، والنتيجة نفسها (AC-GAP-07)
+  const facRows = SRC.parseCSV(fs.readFileSync(path.join(FIX, 'faculty.csv'), 'utf8'));
+  const xlsxPath = path.join(tmp, 'faculty.xlsx');
+  fs.writeFileSync(xlsxPath, xlsxBuffer(facRows, 1000));
+  const xl = await upload('faculty', xlsxPath);
+  await calc();
+  const r1d = await row('AR-EDU-1');
+  check('C6-10', 'رفع xlsx فيه 1000 صف فارغ منسق: «faculty.xlsx · 10 صفوف»، والمؤشر 1 «1:16.7» كما في CSV (AC-GAP-07)', /faculty\.xlsx · 10 صفوف/.test(xl.status) && /الورقة: البيانات/.test(xl.status) && /1:16\.7/.test(r1d), xl.status);
+
+  // C6-11 فحوص الجودة ونطاق الروابط في نموذجين (AC-CALC-14، AC-GAP-04)
+  await upload('form3', path.join(FIX, 'quality.csv'));
+  const q3 = await txt('[data-slot="form3"] .quality');
+  await upload('form8', path.join(FIX, 'links.csv'));
+  for (const id of ['col-form3Rows', 'col-form8Rows', 'col-linkCheck']) await p.eval('const s = document.getElementById("' + id + '"); s.value = s.querySelector("option[value=\'LINK\'], option[value=\'ID\']") ? (s.querySelector("option[value=\'LINK\']") || s.querySelector("option[value=\'ID\']")).value : ""; s.dispatchEvent(new Event("change")); return true;');
+  await calc();
+  const r8 = await row('AR-EDU-8'), r3b = await row('AR-EDU-3');
+  check('C6-11', 'الجودة: «3 صفوف فارغة في آخر الملف (من الصف 10)»، ونطاق الروابط: المؤشر 8 «5» مع «2 مخالفة … (الصفوف 3، 5)» (AC-CALC-14، AC-GAP-04)',
+    /3 صفوف فارغة في آخر الملف \(من الصف 10\)/.test(q3) && (await val('AR-EDU-8')) === '5' && /2 مخالفة للنطاق scopus\.com \(الصفوف 3، 5\)/.test(r8) && (await val('AR-EDU-3')) === '8', q3 + ' · ' + r8.slice(0, 80));
+
+  // C6-12 تصدير تقرير الحساب CSV
+  await p.clickSelector('#calc-export');
+  let csv = null;
+  for (let i = 0; i < 40 && !csv; i++) { await sleep(150); const f = path.join(dlDir, 'basira-calculation-' + TODAY + '.csv'); if (fs.existsSync(f)) { await sleep(150); csv = fs.readFileSync(f, 'utf8'); } }
+  const lines = csv ? csv.split('\r\n').filter(Boolean) : [];
+  check('C6-12', 'تصدير تقرير الحساب: CSV بترميز UTF-8 مع BOM، ورأس و8 مؤشرات، وAR-EDU-1 بقيمته ومقارنته', csv && csv.charCodeAt(0) === 0xFEFF && lines.length === 9 && /"AR-EDU-1",".*","1:16\.7","1:11","نعم","1:19"/.test(lines[1]), (lines[1] || 'لا ملف').slice(0, 90));
+
+  // C6-13 إعادة التحميل: الملفات تختفي من الذاكرة، وتبقى آخر نتائج محفوظة دون إنشاء متطلبات
+  await p.goto(APP + '#/calculate');
+  const after = await p.eval('return { meta: (document.getElementById("results-meta") || {}).textContent || "", slot: document.querySelector(\'[data-slot="faculty"]\').textContent, makeReq: document.querySelectorAll(".make-req").length, r1: (document.querySelector(\'tr[data-key="AR-EDU-1"]\') || {}).textContent || "" };');
+  check('C6-13', 'بعد إعادة التحميل: «يلزم رفعه من جديد» للملفات، وتُعرض نتائج آخر تشغيل محفوظ، ولا أزرار متطلبات من نتائج محفوظة',
+    /نتائج آخر تشغيل محفوظ/.test(after.meta) && /آخر ملف استُخدم: «faculty\.xlsx»/.test(after.slot) && /يلزم رفعه من جديد/.test(after.slot) && after.makeReq === 0 && /1:16\.7/.test(after.r1), after.meta);
+
+  // C6-14 الأداء في المتصفح: CSV بـ 100 ألف صف و300 ألف صف فارغ، وxlsx فيه نحو 300 ألف صف فارغ منسق
+  let big = 'EMPLOYEE_ID,RANK_DESC,NAME\n';
+  for (let i = 0; i < 100000; i++) big += 'X' + i + ',' + (i % 10 === 0 ? 'فني' : 'أستاذ') + ',اسم-وهمي-' + i + '\n';
+  big += ',,\n'.repeat(300000);
+  const bigCsv = path.join(tmp, 'big.csv'); fs.writeFileSync(bigCsv, big);
+  const bc = await upload('faculty', bigCsv);
+  const bigX = path.join(tmp, 'big.xlsx');
+  fs.writeFileSync(bigX, xlsxBuffer(facRows, 298000));
+  const bx = await upload('heqs', bigX);
+  const sizes = (fs.statSync(bigCsv).size / 1048576).toFixed(1) + 'MB CSV و' + (fs.statSync(bigX).size / 1048576).toFixed(1) + 'MB xlsx';
+  check('C6-14', 'الأداء في المتصفح: قراءة الملفين الكبيرين أقل من 10 ثوانٍ لكل منهما', /100000 صفًا/.test(bc.status) && /10 صفوف/.test(bx.status) && bc.ms < 10000 && bx.ms < 10000,
+    sizes + ' · CSV ' + (bc.ms / 1000).toFixed(1) + ' ث · xlsx ' + (bx.ms / 1000).toFixed(1) + ' ث');
+
+  const outside = requests.filter(u => !/^(file|blob|data|about|devtools):/.test(u));
+  check('C6-15', 'لا طلبات شبكة خارجية ولا أخطاء في وحدة التحكم طوال سيناريوهات الحساب', !outside.length && !p.errors.length, (outside.join(', ') || requests.length + ' طلبًا محليًا') + ' · أخطاء: ' + (p.errors.join(' | ') || 'صفر'));
+  await cdp.send('Target.closeTarget', { targetId: p.targetId });
+}
+
 // ---------- التشغيل ----------
 async function main() {
   const browser = CANDIDATES.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } });
@@ -1035,6 +1250,7 @@ async function main() {
     await runPhase4(cdp);
     await runPhase5(cdp, tmp);
     await runQA(cdp);
+    await runCalc(cdp, tmp);
     if (ARTIFACTS) console.log('\nPDF الطباعة: ' + pdfPath);
   } catch (err) {
     check('E-ERR', 'خطأ في تشغيل الفحص', false, err.message);

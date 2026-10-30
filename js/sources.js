@@ -237,6 +237,23 @@
     return { fileName: String(fileName || ''), uploadedAt: uploadedAt || '', rowCount: table.records.length, headerRow: table.headerRow, columns: table.columns.slice() };
   }
 
+  /*
+   * فك ترميز ملف نصي: UTF-8 أولًا (بشكل صارم). إذا فشل فـ Windows-1256، وهو ما يحفظ به Excel العربي
+   * ملفات «CSV» العادية. يعيد { text, encoding }.
+   */
+  function decodeBytes(bytes) {
+    var u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    try {
+      return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), encoding: 'UTF-8' };
+    } catch (e) {
+      try {
+        return { text: new TextDecoder('windows-1256').decode(u8), encoding: 'Windows-1256' };
+      } catch (e2) {
+        return { text: new TextDecoder('utf-8').decode(u8), encoding: 'UTF-8 (مع أحرف غير مقروءة)' };
+      }
+    }
+  }
+
   // من نص CSV إلى جدول في خطوة واحدة.
   function tableFromCSV(text, headerRow) {
     var rows = parseCSV(text);
@@ -251,6 +268,7 @@
     checkFile: checkFile,
     detectDelimiter: detectDelimiter,
     parseCSV: parseCSV,
+    decodeBytes: decodeBytes,
     toNumber: toNumber,
     detectHeaderRow: detectHeaderRow,
     toTable: toTable,

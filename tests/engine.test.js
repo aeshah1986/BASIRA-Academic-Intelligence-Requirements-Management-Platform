@@ -237,7 +237,7 @@ test('ENG-16 «اعتماد القيمة» يحدّث القيمة ومصدره�
   assert.equal(res.ok, true);
   const i1 = data.indicators.find(i => i.id === 'ind-ar-edu-1');
   assert.equal(i1.currentValue, '1:18.8');
-  assert.match(i1.valueSource, /^محسوب في بصيرة \(التصنيف العربي 2026\): ratio\(.*الملفات: faculty\.csv · 2026-11-01$/);
+  assert.equal(i1.valueSource, 'محسوب في بصيرة (التصنيف العربي 2026) · الملفات: faculty.csv · 2026-11-01');
   assert.equal(i1.workStatus, 'evidenced', 'حالة العمل لا تتغير');
   assert.equal(data.activities[0].action, 'calc_approve');
   assert.match(data.activities[0].summary, /AR-EDU-1: 1:18\.8 \(كانت 1:15\)/);
@@ -438,4 +438,20 @@ test('ENG-23 xlsx: سطر عناوين في الصف 13، ونص مضمّن وك
   assert.equal(amp.rows[1][0], 'بحث & تطوير');
   await assert.rejects(X.readXlsx(new Uint8Array([1, 2, 3, 4, 5])), /ليس بصيغة xlsx صالحة/);
   assert.equal(X.colIndex('AA1'), 26);
+});
+
+test('ENG-24 ترميز الملف: UTF-8، وWindows-1256 (CSV من Excel العربي) يُكتشف تلقائيًا', () => {
+  const utf = SRC.decodeBytes(new TextEncoder().encode('الرتبة,العدد\nأستاذ,3'));
+  assert.deepEqual([utf.encoding, utf.text.split('\n')[1]], ['UTF-8', 'أستاذ,3']);
+  // «أستاذ» بترميز Windows-1256: C3 D3 CA C7 D0
+  const cp = SRC.decodeBytes(new Uint8Array([0xC3, 0xD3, 0xCA, 0xC7, 0xD0, 0x2C, 0x33]));
+  assert.deepEqual([cp.encoding, cp.text], ['Windows-1256', 'أستاذ,3']);
+});
+
+test('ENG-25 شرح الصيغة بالعربية من شجرتها، دون معرّفات برمجية', () => {
+  const c = E.defaultCycle();
+  assert.equal(E.explainFormula(c.recipes[0].formula, c.inputs),
+    'نسبة 1 إلى (مجموع (طلبة القبول والتسجيل، طلبة الدراسات العليا) ÷ العدد المكافئ للدوام الكامل من (أعضاء هيئة التدريس المتفرغون، أعضاء هيئة التدريس غير المتفرغين))');
+  assert.equal(E.explainFormula('value(hCount)', c.inputs), 'أعضاء بمعامل هيرش ≥ العتبة');
+  assert.match(E.explainFormula('alert(1)', c.inputs), /غير معروفة/);
 });

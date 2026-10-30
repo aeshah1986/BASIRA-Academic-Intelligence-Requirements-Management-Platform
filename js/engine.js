@@ -514,10 +514,29 @@
     };
   }
 
+  // شرح عربي للصيغة من شجرتها: «نسبة: مجموع (طلبة القبول، طلبة الدراسات العليا) إلى العدد المكافئ (…)».
+  var FN_AR = { value: '', add: 'مجموع', subtract: 'الفرق بين', divide: 'قسمة', percent: 'نسبة مئوية', fte: 'العدد المكافئ للدوام الكامل من' };
+  function explainFormula(formula, inputs) {
+    var labels = {};
+    (inputs || []).forEach(function (i) { labels[i.key] = i.label; });
+    var parsed = parseFormula(formula, Object.keys(labels));
+    if (!parsed.ok) return parsed.message;
+    function say(n) {
+      if (n.num !== undefined) return String(n.num);
+      if (n.input) return labels[n.input];
+      var parts = n.args.map(say);
+      if (n.fn === 'ratio') return 'نسبة 1 إلى (' + parts[0] + ' ÷ ' + parts[1] + ')';
+      if (n.fn === 'value') return parts[0];
+      return FN_AR[n.fn] + ' (' + parts.join('، ') + ')';
+    }
+    return say(parsed.ast);
+  }
+
   // نص «مصدر الرقم» عند الاعتماد (G1): الملفات والتصفية والتاريخ، بحد 200 حرف.
   function sourceText(result, cycle, today) {
     var files = (cycle.sources || []).map(function (s) { return s.fileName; }).filter(Boolean);
-    var t = 'محسوب في بصيرة (' + cycle.label + '): ' + result.formula + (files.length ? ' · الملفات: ' + files.join('، ') : '') + ' · ' + today;
+    // نص عربي يُعرض في صفحة المؤشر. الصيغة نفسها محفوظة في وصفة الدورة وتشغيلاتها.
+    var t = 'محسوب في بصيرة (' + cycle.label + ')' + (files.length ? ' · الملفات: ' + files.join('، ') : '') + ' · ' + today;
     return t.length > 200 ? t.slice(0, 199) + '…' : t;
   }
 
@@ -566,6 +585,7 @@
     conflicts: conflicts,
     linkDomainCheck: linkDomainCheck,
     storableRun: storableRun,
+    explainFormula: explainFormula,
     sourceText: sourceText,
     suggestRequirement: suggestRequirement
   };
