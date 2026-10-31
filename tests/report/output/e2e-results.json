@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-30T15:05:01.288Z",
+  "ranAt": "2026-10-31T11:35:27.674Z",
   "browser": "Edg/156.0.4314.50",
   "results": [
     {
@@ -66,7 +66,7 @@
       "id": "E-10",
       "name": "إضافة متطلب بعنوان فيه HTML: يُحفظ ويظهر نصًا (AC-CRUD-01، AC-SEC-01)",
       "ok": true,
-      "detail": "{\"hash\":\"#/requirements/req-mvv3q2it-brx0\",\"h1\":\"<img src=x onerror=alert(1)> اختبار e2e\",\"imgs\":0,\"stored\":7}"
+      "detail": "{\"hash\":\"#/requirements/req-mvwboafd-nbdv\",\"h1\":\"<img src=x onerror=alert(1)> اختبار e2e\",\"imgs\":0,\"stored\":7}"
     },
     {
       "id": "E-11",
@@ -228,7 +228,7 @@
       "id": "P4-12",
       "name": "استيراد نسخة بالإصدار 1: التأكيد يذكر الترقية، وتُحفظ بالإصدار 2 ويُسجَّل الاستيراد",
       "ok": true,
-      "detail": "استُوردت البيانات من «basira-v1-1793372601404.json» (رُقّيت من الإصدار 1)."
+      "detail": "استُوردت البيانات من «basira-v1-1793446422969.json» (رُقّيت من الإصدار 1)."
     },
     {
       "id": "P4-13",
@@ -342,7 +342,7 @@
       "id": "Q-04",
       "name": "لوحة المفاتيح فقط: الانتقال بين حقول نموذج المتطلب بـ Tab، وEnter يرسل، والأسهم تختار، والكتابة تملأ التاريخ (AC-UI-05، AC-CRUD-01)",
       "ok": true,
-      "detail": "ترتيب Tab: ranking ← indicatorId ← entityId ← assignee ← deadline ← deadline ← status ← priority ← description ← missingData ← evidenceLink ← حفظ المتطلب ← إلغاء ← انتقل إلى ال · القيم: ind-ar-edu-1 | ent-hr | 2026-10-30 · #/requirements/req-mvv3rvu2-5xi6"
+      "detail": "ترتيب Tab: ranking ← indicatorId ← entityId ← assignee ← deadline ← deadline ← status ← priority ← description ← missingData ← evidenceLink ← حفظ المتطلب ← إلغاء ← انتقل إلى ال · القيم: ind-ar-edu-1 | ent-hr | 2026-10-30 · #/requirements/req-mvwbq6ge-j068"
     },
     {
       "id": "Q-05",
@@ -456,7 +456,7 @@
       "id": "C6-06",
       "name": "متطلب من تنبيه FTE: التأكيد يذكر الموارد البشرية، فيُنشأ متطلب واحد، والضغط الثاني يفتح الموجود دون تكرار (AC-GAP-02)",
       "ok": true,
-      "detail": "سيُنشأ متطلب «بيانات أعضاء هيئة التدريس غير المتفرغين» للمؤشر AR-EDU-1، والجهة « · #/requirements/req-mvv3sl4a-0d3t"
+      "detail": "سيُنشأ متطلب «بيانات أعضاء هيئة التدريس غير المتفرغين» للمؤشر AR-EDU-1، والجهة « · #/requirements/req-mvwbqxaf-9ll2"
     },
     {
       "id": "C6-07",
@@ -504,7 +504,7 @@
       "id": "C6-14",
       "name": "الأداء في المتصفح: قراءة الملفين الكبيرين أقل من 10 ثوانٍ لكل منهما",
       "ok": true,
-      "detail": "4.6MB CSV و2.4MB xlsx · CSV 0.2 ث · xlsx 0.3 ث"
+      "detail": "4.6MB CSV و2.4MB xlsx · CSV 0.3 ث · xlsx 0.3 ث"
     },
     {
       "id": "C6-15",
@@ -564,7 +564,7 @@
       "id": "L-10",
       "name": "مؤشر جديد AR-RES-1: خانة ملفه تظهر تلقائيًا، ورفع ملفه وحده يعطي 3 (سطر العناوين 3، واستبعاد عمودين فارغين وصف مكرر)، ويظهر في التحليل",
       "ok": true,
-      "detail": "مرفوع basira-awards-1793372698890.csv · 4 صفوف · سطر العناوين 3 · 3 أعمدة (استُبعد 2 فارغ) · UTF-8 · القيمة: 3"
+      "detail": "مرفوع basira-awards-1793446525165.csv · 4 صفوف · سطر العناوين 3 · 3 أعمدة (استُبعد 2 فارغ) · UTF-8 · القيمة: 3"
     },
     {
       "id": "L-11",
