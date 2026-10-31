@@ -48,7 +48,7 @@ module.exports = {
   'AC-RPT-04': { tests: ['E-18', 'P5-09'], partial: 'فُحص نسق الطباعة بمحاكاة وسائط الطباعة وPDF، لا بطابعة.' },
   'AC-RPT-05': { tests: ['CSV-01', 'P5-12'], partial: 'فُحص الترميز (BOM وUTF-8) في الملف المنزل، ولم يُفتح في Excel نفسه.' },
   'AC-RPT-06': { tests: ['CSV-01'] },
-  'AC-RPT-07': { status: 'not_implemented', note: 'لا يوجد تصدير لقائمة المتطلبات المصفاة. التصدير متاح للتقارير وللأولويات (حالة COULD).' },
+  'AC-RPT-07': { tests: ['INT-21', 'P5-15'] },
   'AC-RPT-08': { tests: ['Q-10', 'Q-15'] },
   'AC-PER-01': { tests: ['E-14'] },
   'AC-PER-03': { tests: ['E-15'] },

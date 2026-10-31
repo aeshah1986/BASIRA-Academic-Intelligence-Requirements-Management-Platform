@@ -681,6 +681,22 @@ async function runPhase5(cdp, tmp) {
     csv1 && csv1.charCodeAt(0) === 0xFEFF && lines1.length === 5 && lines1[1].startsWith('"1","87","بيانات الخبراء') && csv2 && /"وحدة الشراكات الدولية","1","1","100%"/.test(csv2),
     (lines1[1] || 'لا ملف').slice(0, 50));
 
+  // P5-15 تصدير قائمة المتطلبات المصفاة (AC-RPT-07): الحالة «بانتظار الجهة» = F6 ثم F2، ودون تصفية = كل المتطلبات
+  await p.route('#/requirements?status=waiting');
+  const note = await p.eval('return document.querySelector(".filters").textContent;');
+  await p.clickSelector('#export-requirements');
+  const csv3 = await waitFile('basira-requirements-filtered-' + TODAY + '.csv');
+  await p.route('#/requirements');
+  await p.clickSelector('#export-requirements');
+  const csv4 = await waitFile('basira-requirements-' + TODAY + '.csv');
+  const total = (await stored()).requirements.length;
+  const lines3 = csv3 ? csv3.split('\r\n').filter(Boolean) : [];
+  const lines4 = csv4 ? csv4.split('\r\n').filter(Boolean) : [];
+  check('P5-15', 'تصدير المتطلبات المصفاة: الظاهر فقط وبترتيبه (F6 ثم F2)، ودون تصفية كل المتطلبات، والواجهة تذكر ذلك (AC-RPT-07)',
+    /النتائج الظاهرة فقط/.test(note) && csv3 && csv3.charCodeAt(0) === 0xFEFF && lines3.length === 3 &&
+    lines3[1].startsWith('"بيانات الخبراء المنتدبين') && lines3[2].startsWith('"بيانات الطلاب الدوليين') && lines4.length === total + 1,
+    lines3.length - 1 + ' مصفاة، و' + (lines4.length - 1) + ' من ' + total + ' دون تصفية');
+
   // P5-13 لا طلبات شبكة خارج الملفات المحلية، ولا أخطاء
   const external = requests.filter(u => !/^(file|blob|data|about|chrome-extension|devtools):/.test(u));
   check('P5-13', 'لا أي طلب شبكة خارجي أثناء التحليل والخطابات والنسخ والطباعة والتصدير (AC-COM-09)', requests.length > 0 && !external.length, external.join(', ') || requests.length + ' طلبًا محليًا فقط');
