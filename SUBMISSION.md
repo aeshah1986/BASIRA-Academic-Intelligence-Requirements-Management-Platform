@@ -25,6 +25,9 @@
 | تغيير في الكود بلا اختبار | كل commit فيه كود معه فحصه: الميزة مع INT-21 وP5-15، والـ Hook مع HOOK-01..04 | ✓ |
 | تقرير عام بلا أمثلة | التقرير ينسخ طلبات حقيقية، ويذكر أخطاء B23 وB26 وخطأ «لا يظهر مع التحليل» | ✓ |
 
+## المنصة منشورة (للتجربة المباشرة)
+https://rococo-cuchufli-9835df.netlify.app (Netlify، من الفرع main، ويتحدث تلقائيًا مع كل رفع).
+
 ## طريقة التسليم (عبر منصة الأكاديمية)
 - [ ] **رابط المستودع (عام):** https://github.com/aeshah1986/BASIRA-Academic-Intelligence-Requirements-Management-Platform. البريد الشخصي مخفي في كل الـ commits (بريد GitHub المخفي).
 - [ ] **رابط طلب الدمج (PR):** من `feature/export-filtered-requirements` إلى `main`.
