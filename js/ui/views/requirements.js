@@ -33,9 +33,22 @@
     var counter = h('p', { class: 'result-count', role: 'status', 'aria-live': 'polite' });
     var form;
 
-    function refresh() {
+    function currentList() {
       var list = B.query.filterRequirements(d.requirements, state, { indicatorsById: ctx.lookups.indicatorsById, today: ctx.today });
-      list = sortList(list, state.sort, ctx.today);
+      return sortList(list, state.sort, ctx.today);
+    }
+
+    // يُصدَّر ما يظهر في النتائج فقط، بالترتيب نفسه (AC-RPT-07).
+    function exportCsv() {
+      var list = currentList();
+      if (!list.length) { ctx.toast('لا توجد نتائج لتصديرها.', 'info'); return; }
+      var name = 'basira-requirements' + (B.query.hasActiveFilters(state) ? '-filtered' : '') + '-' + ctx.today + '.csv';
+      ctx.download(name, B.csv.toCSV(I.REQUIREMENT_HEADERS, I.requirementRows(list, d, ctx.today)), 'text/csv;charset=utf-8');
+      ctx.toast('نُزّل الملف: ' + name + ' (عدد المتطلبات: ' + list.length + ' من ' + d.requirements.length + ')', 'success');
+    }
+
+    function refresh() {
+      var list = currentList();
       counter.textContent = 'عدد النتائج: ' + list.length + ' من ' + d.requirements.length;
       B.dom.clear(results);
       if (!d.requirements.length) {
@@ -83,7 +96,9 @@
         U.field({ id: 'f-sort', name: 'sort', label: 'الترتيب', control: control('sort', U.selectControl('sort', SORTS, state.sort)) })),
       h('div', { class: 'filters__actions' },
         counter,
-        h('button', { type: 'button', class: 'btn btn--ghost btn--small', onclick: function () { clearAll(); } }, 'مسح الكل')));
+        h('button', { type: 'button', class: 'btn btn--ghost btn--small', onclick: function () { clearAll(); } }, 'مسح الكل'),
+        h('button', { type: 'button', class: 'btn btn--secondary btn--small', id: 'export-requirements', onclick: exportCsv }, B.dom.icon('download'), 'تصدير النتائج CSV')),
+      h('p', { class: 'muted small' }, 'التصدير يشمل النتائج الظاهرة فقط بعد البحث والتصفية، وبالترتيب نفسه.'));
 
     function clearAll() {
       // replaceState لا يطلق hashchange، فلا يُعاد الرسم مرتين ولا يضيع التركيز.

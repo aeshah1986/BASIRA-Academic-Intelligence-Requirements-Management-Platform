@@ -286,3 +286,35 @@ test('INT-20 المحرك يعمل على بيانات العرض في توار�
     assert.equal(validateDataset(data).ok, true);
   }
 });
+
+// ---------- تصدير المتطلبات المصفاة (AC-RPT-07) ----------
+// المتوقع محسوب يدويًا من data/sample-data.js: الحالة «بانتظار الجهة» = F2 وF6، والترتيب بالإلحاح يضع المتأخر F6 أولًا.
+test('INT-21 تصدير المتطلبات المصفاة: الصفوف الظاهرة فقط وبترتيبها، والخلايا مطابقة للحساب اليدوي', () => {
+  const Q = require('../js/query.js');
+  const D = require('../js/derive.js');
+  const C = require('../js/csv.js');
+  const { data } = setup();
+  const byId = Object.fromEntries(data.indicators.map(i => [i.id, i]));
+  const list = D.sortByUrgency(Q.filterRequirements(data.requirements, { status: 'waiting' }, { indicatorsById: byId, today: T }), T);
+  const rows = I.requirementRows(list, data, T);
+  assert.equal(rows.length, 2, 'متطلبان فقط من 6');
+  rows.forEach(r => assert.equal(r.length, I.REQUIREMENT_HEADERS.length));
+  assert.deepEqual(rows[0], ['بيانات الخبراء المنتدبين من خارج الجامعة', 'AR-EDU-6', 'التصنيف العربي للجامعات', 'وحدة الشؤون الأكاديمية', 'د. هند الغامدي',
+    '2026-10-25', 'متأخر منذ 7 أيام', 'بانتظار الجهة', 'عالية', 'ردود الكليات على خطاب الطلب', 'لا متابعات']);
+  assert.deepEqual(rows[1].slice(0, 7), ['بيانات الطلاب الدوليين', 'QS-ISR', 'QS', 'وحدة شؤون الطلاب', 'د. نورة الزهراني', '2026-11-05', 'متبقٍ 4 أيام']);
+
+  // آخر متابعة بتاريخها، وبحث عربي دون همزة: «اعداد» = F1 وF5.
+  const f1 = I.requirementRows([req(data, 'req-f1')], data, T)[0];
+  assert.equal(f1[10], '2026-10-22');
+  const searched = Q.filterRequirements(data.requirements, { q: 'اعداد' }, { indicatorsById: byId, today: T });
+  assert.deepEqual(I.requirementRows(searched, data, T).map(r => r[1]).sort(), ['AR-EDU-1', 'AR-EDU-8']);
+
+  // ملف CSV: BOM، ورأس + صفان، ولا يتغير محتوى البيانات بالتصدير.
+  const before = JSON.stringify(data);
+  const text = C.toCSV(I.REQUIREMENT_HEADERS, rows);
+  const lines = text.split('\r\n').filter(Boolean);
+  assert.equal(text.charCodeAt(0), 0xFEFF);
+  assert.equal(lines.length, 3);
+  assert.ok(lines[1].startsWith('"بيانات الخبراء المنتدبين من خارج الجامعة","AR-EDU-6"'));
+  assert.equal(JSON.stringify(data), before);
+});

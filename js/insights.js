@@ -529,6 +529,21 @@
 
   var RESPONSE_HEADERS = ['الجهة', 'المتطلبات', 'المكتمل', 'نسبة التسليم في الموعد', 'متوسط أيام التأخر', 'تصعيدات L3+', 'المفتوح', 'المتأخر الآن'];
 
+  // صفوف CSV لقائمة المتطلبات كما تظهر بعد البحث والتصفية والترتيب (AC-RPT-07): الصف لكل متطلب بترتيب list نفسه.
+  function requirementRows(list, data, today) {
+    var cx = context(data);
+    return list.map(function (r) {
+      var ind = cx.indicatorsById[r.indicatorId];
+      var ent = cx.entitiesById[r.entityId];
+      var rk = rankingOf(r, cx);
+      var last = D.lastFollowUp(r);
+      return [r.title, ind ? ind.code : '', rk ? rk.name : '', ent ? ent.name : '', r.assignee || '', r.deadline, D.dueInfo(r, today).label,
+        M.STATUSES[r.status] || r.status, M.PRIORITIES[r.priority] || r.priority, r.missingData || '', last ? last.date : 'لا متابعات'];
+    });
+  }
+
+  var REQUIREMENT_HEADERS = ['المتطلب', 'رمز المؤشر', 'التصنيف', 'الجهة', 'المكلف', 'الموعد', 'حالة الموعد', 'الحالة', 'الأولوية', 'البيانات الناقصة', 'آخر متابعة'];
+
   return {
     LEVELS: LEVELS,
     DUE_BUCKETS: DUE_BUCKETS,
@@ -536,6 +551,7 @@
     DEFAULT_TEMPLATES: DEFAULT_TEMPLATES,
     PRIORITY_HEADERS: PRIORITY_HEADERS,
     RESPONSE_HEADERS: RESPONSE_HEADERS,
+    REQUIREMENT_HEADERS: REQUIREMENT_HEADERS,
     requirementConditions: requirementConditions,
     incompleteRequirements: incompleteRequirements,
     indicatorGaps: indicatorGaps,
@@ -552,6 +568,7 @@
     buildLetter: buildLetter,
     suggestedLevel: suggestedLevel,
     priorityRows: priorityRows,
-    responseRows: responseRows
+    responseRows: responseRows,
+    requirementRows: requirementRows
   };
 });
